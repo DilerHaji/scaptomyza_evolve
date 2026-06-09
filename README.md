@@ -28,6 +28,8 @@ sflava-expevol-release/
 ```
 
 ## Figure to code map
+#### See the SCRIPTS.md file for descriptions of all scripts
+
 | Figure | What it shows                                                              | Key script(s)                                                                                                                                                                                                                                                                                             |
 | :----- | :------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1**  | Experimental design, host-plant occurrence map                             | occurrence map drawn from iNaturalist records                                                                                                                                                                                                                                 |
