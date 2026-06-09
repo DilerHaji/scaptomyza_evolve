@@ -8,7 +8,7 @@ analyses test whether multiple-niche (Levene Model) selection maintains host-ass
 This is analysis source code was developed to run on an HPC cluster (Berkeley Savio) using Snakemake. Absolute cluster/local paths and cluster-specific SLURM settings are replaced with placeholders. You must set these for your environment before running anything, see
 Configuration. Third-party tools are documented in INSTALL.md.
 
-Repository Organization
+## Repository Organization
 ```
 sflava-expevol-release/
 ├── genomic_analysis/        Main pool-seq Snakemake pipeline (the bulk of the analyses)
@@ -27,7 +27,7 @@ sflava-expevol-release/
 └── fitness/                 Reciprocal performance, viability, heritability, theory
 ```
 
-#### Figure to code map
+## Figure to code map
 | Figure | What it shows                                                              | Key script(s)                                                                                                                                                                                                                                                                                             |
 | :----- | :------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **1**  | Experimental design, host-plant occurrence map                             | occurrence map drawn from iNaturalist records                                                                                                                                                                                                                                 |
@@ -56,7 +56,7 @@ sflava-expevol-release/
 | —       | Wild host-associated differentiation (BayPass)                                | rules/baypass_wild.smk, run_baypass_wild.sh                                                                                                                                                                            |
 
 
-### Third-party tools
+## Third-party tools
 | Tool                             | Upstream                                            | License  | Used for                                 |
 | :------------------------------- | :-------------------------------------------------- | :------- | :--------------------------------------- |
 | grenedalf                        | github.com/lczech/grenedalf                         | GPL-3    | diversity (π/θ_W/D) & FST                |
@@ -78,7 +78,7 @@ sflava-expevol-release/
 Portions of this code and documentation were developed with the assistance of AI coding tools (Anthropic's Claude). All analyses, scientific decisions, and final code were designed, reviewed, and validated by the authors. 
 
 
-#### License
+## License
 
 This project's code is released under the **GNU General Public License v3.0**.
 
