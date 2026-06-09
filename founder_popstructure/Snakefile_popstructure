@@ -1,0 +1,353 @@
+configfile: "config/popstructure.yaml"
+
+import os
+
+
+SAMPLES_TSV        = config["input"]["samples_tsv"]
+FOUNDERS_BAMLIST   = config["input"]["founders_bamlist"]
+FOUNDERS_BEAGLE    = config["input"]["founders_beagle"]
+T2G07_BAMLIST      = config["input"]["all_bamlist"]   # actually T2G07-only despite the name
+ALL_BAMLIST        = "popstructure/angsd/all192.bamlist"  # built from founders + T2G07
+
+
+REF = config["reference_genome"]
+
+K_RANGE  = config["pcangsd"]["k_range"]
+N_PCS    = config["pcangsd"]["n_pcs"]
+ITER     = config["pcangsd"]["iter"]
+THREADS  = config["pcangsd"]["threads"]
+MINMAF   = config["pcangsd"]["minmaf"]
+
+
+
+
+rule all_popstructure:
+    input:
+        "popstructure/metadata/founders.tsv",
+        "popstructure/metadata/all192.tsv",
+        expand("popstructure/pcangsd/founders_K{k}.admix.{k}.Q",
+               k=K_RANGE),
+        expand("popstructure/pcangsd/founders_K{k}.cov",
+               k=K_RANGE),
+        "popstructure/figures/founders_pca_by_host.png",
+        "popstructure/figures/founders_pca_by_host.svg",
+        "popstructure/figures/founders_pca_by_host_labeled.png",
+        "popstructure/figures/founders_pca_by_host_labeled.svg",
+        "popstructure/figures/founders_admix_ksweep.png",
+        "popstructure/figures/founders_admix_ksweep.svg",
+        "popstructure/figures/all192_pca_founders_vs_t2g07.png",
+        "popstructure/figures/all192_pca_founders_vs_t2g07.svg",
+        "popstructure/tables/founders_K2_by_host.tsv",
+        "popstructure/tables/founders_K3_by_host.tsv",
+        "popstructure/qc/verify_report.txt",
+
+
+
+
+rule build_metadata_founders:
+    input:
+        bamlist = FOUNDERS_BAMLIST,
+        config  = "config/popstructure.yaml",
+    output:
+        tsv = "popstructure/metadata/founders.tsv",
+    log:
+        "logs/popstructure/build_metadata_founders.log",
+    shell:
+        r"""
+        mkdir -p popstructure/metadata logs/popstructure
+        python scripts/build_founder_metadata.py \
+            --bamlist {input.bamlist} \
+            --config  {input.config} \
+            --output  {output.tsv} \
+            2> {log}
+        """
+
+rule build_metadata_all192:
+    input:
+        bamlist = ALL_BAMLIST,
+        config  = "config/popstructure.yaml",
+    output:
+        tsv = "popstructure/metadata/all192.tsv",
+    log:
+        "logs/popstructure/build_metadata_all192.log",
+    shell:
+        r"""
+        mkdir -p popstructure/metadata logs/popstructure
+        python scripts/build_founder_metadata.py \
+            --bamlist {input.bamlist} \
+            --config  {input.config} \
+            --output  {output.tsv} \
+            2> {log}
+        """
+
+
+
+rule build_all192_bamlist:
+    input:
+        founders = FOUNDERS_BAMLIST,
+        t2g07    = T2G07_BAMLIST,
+    output:
+        bamlist = ALL_BAMLIST,
+    log:
+        "logs/popstructure/build_all192_bamlist.log",
+    shell:
+        r"""
+        mkdir -p popstructure/angsd logs/popstructure
+        cat {input.founders} {input.t2g07} > {output.bamlist}
+        wc -l {output.bamlist} > {log}
+        """
+
+
+rule angsd_all192_beagle:
+    input:
+        bamlist = ALL_BAMLIST,
+        ref     = REF,
+    output:
+        beagle = "popstructure/angsd/all192.beagle.gz",
+        mafs   = "popstructure/angsd/all192.mafs.gz",
+    params:
+        out_prefix = "popstructure/angsd/all192",
+        min_ind    = 96,       # >=half of 192
+    log:
+        "logs/popstructure/angsd_all192.log",
+    threads: THREADS
+    resources:
+        mem_mb  = 64000,
+        time    = "24:00:00",
+    conda:
+        "envs/angsd.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/angsd logs/popstructure
+        angsd \
+            -b {input.bamlist} \
+            -ref {input.ref} \
+            -GL 1 \
+            -doGlf 2 \
+            -doMajorMinor 1 \
+            -doMaf 1 \
+            -SNP_pval 1e-6 \
+            -minMapQ 20 \
+            -minQ 20 \
+            -minInd {params.min_ind} \
+            -minMaf 0.01 \
+            -nThreads {threads} \
+            -out {params.out_prefix} \
+            > {log} 2>&1
+        """
+
+
+
+
+rule pcangsd_founders_ksweep:
+    input:
+        beagle = FOUNDERS_BEAGLE,
+    output:
+        cov   = "popstructure/pcangsd/founders_K{k}.cov",
+        admix = "popstructure/pcangsd/founders_K{k}.admix.{k}.Q",
+    params:
+        out_prefix = "popstructure/pcangsd/founders_K{k}",
+        n_pcs      = N_PCS,
+        itr        = ITER,
+        minmaf     = MINMAF,
+        admix_k    = "{k}",
+    log:
+        "logs/popstructure/pcangsd_founders_K{k}.log",
+    threads: THREADS
+    resources:
+        mem_mb = 32000,
+        time   = "06:00:00",
+    conda:
+        "envs/pcangsd.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/pcangsd logs/popstructure
+        pcangsd \
+            -b {input.beagle} \
+            -e {params.n_pcs} \
+            --iter {params.itr} \
+            --maf {params.minmaf} \
+            --admix \
+            --admix-K {params.admix_k} \
+            -o {params.out_prefix} \
+            -t {threads} \
+            > {log} 2>&1
+        """
+
+
+
+rule pcangsd_all192:
+    input:
+        beagle = "popstructure/angsd/all192.beagle.gz",
+    output:
+        cov   = "popstructure/pcangsd/all192_K{k}.cov",
+        admix = "popstructure/pcangsd/all192_K{k}.admix.{k}.Q",
+    params:
+        out_prefix = "popstructure/pcangsd/all192_K{k}",
+        n_pcs      = N_PCS,
+        itr        = ITER,
+        minmaf     = MINMAF,
+        admix_k    = "{k}",
+    log:
+        "logs/popstructure/pcangsd_all192_K{k}.log",
+    threads: THREADS
+    resources:
+        mem_mb = 48000,
+        time   = "08:00:00",
+    conda:
+        "envs/pcangsd.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/pcangsd logs/popstructure
+        pcangsd \
+            -b {input.beagle} \
+            -e {params.n_pcs} \
+            --iter {params.itr} \
+            --maf {params.minmaf} \
+            --admix \
+            --admix-K {params.admix_k} \
+            -o {params.out_prefix} \
+            -t {threads} \
+            > {log} 2>&1
+        """
+
+
+
+rule plot_founders_pca_by_host:
+    input:
+        cov      = f"popstructure/pcangsd/founders_K{min(K_RANGE)}.cov",
+        metadata = "popstructure/metadata/founders.tsv",
+    output:
+        png = "popstructure/figures/founders_pca_by_host.png",
+        svg = "popstructure/figures/founders_pca_by_host.svg",
+    log:
+        "logs/popstructure/plot_founders_pca_by_host.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/figures
+        python scripts/plot_popstructure_pca.py \
+            --cov {input.cov} \
+            --metadata {input.metadata} \
+            --color-by host_plant \
+            --output {output.png} \
+            2> {log}
+        """
+
+rule plot_founders_pca_labeled:
+    input:
+        cov      = f"popstructure/pcangsd/founders_K{min(K_RANGE)}.cov",
+        metadata = "popstructure/metadata/founders.tsv",
+    output:
+        png = "popstructure/figures/founders_pca_by_host_labeled.png",
+        svg = "popstructure/figures/founders_pca_by_host_labeled.svg",
+    log:
+        "logs/popstructure/plot_founders_pca_labeled.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        python scripts/plot_popstructure_pca.py \
+            --cov {input.cov} \
+            --metadata {input.metadata} \
+            --color-by host_plant \
+            --label-tubes \
+            --output {output.png} \
+            2> {log}
+        """
+
+rule plot_admix_ksweep:
+    input:
+        admix    = expand("popstructure/pcangsd/founders_K{k}.admix.{k}.Q",
+                          k=K_RANGE),
+        metadata = "popstructure/metadata/founders.tsv",
+    output:
+        png = "popstructure/figures/founders_admix_ksweep.png",
+        svg = "popstructure/figures/founders_admix_ksweep.svg",
+    params:
+        pairs = lambda wc, input: " ".join(
+            f"{k}={p}" for k, p in zip(K_RANGE, input.admix)),
+    log:
+        "logs/popstructure/plot_admix_ksweep.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        python scripts/plot_admix_ksweep.py \
+            --admix-files {params.pairs} \
+            --metadata {input.metadata} \
+            --output {output.png} \
+            2> {log}
+        """
+
+rule plot_all192_pca:
+    input:
+        cov      = "popstructure/pcangsd/all192_K2.cov",
+        metadata = "popstructure/metadata/all192.tsv",
+    output:
+        png = "popstructure/figures/all192_pca_founders_vs_t2g07.png",
+        svg = "popstructure/figures/all192_pca_founders_vs_t2g07.svg",
+    log:
+        "logs/popstructure/plot_all192_pca.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        python scripts/plot_popstructure_pca.py \
+            --cov {input.cov} \
+            --metadata {input.metadata} \
+            --color-by pool_type \
+            --output {output.png} \
+            2> {log}
+        """
+
+rule verify_popstructure:
+    input:
+        covs    = expand("popstructure/pcangsd/founders_K{k}.cov",       k=K_RANGE),
+        admix   = expand("popstructure/pcangsd/founders_K{k}.admix.{k}.Q", k=K_RANGE),
+        metadata = "popstructure/metadata/founders.tsv",
+        bamlist  = FOUNDERS_BAMLIST,
+    output:
+        report = "popstructure/qc/verify_report.txt",
+    params:
+        pcangsd_dir = "popstructure/pcangsd",
+        logs_dir    = "logs/popstructure",
+    log:
+        "logs/popstructure/verify.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/qc
+        python scripts/verify_popstructure.py \
+            --pcangsd-dir {params.pcangsd_dir} \
+            --logs-dir    {params.logs_dir} \
+            --metadata    {input.metadata} \
+            --bamlist     {input.bamlist} \
+            --output      {output.report} \
+            > {log} 2>&1
+        """
+
+
+rule summarize_admix_by_source:
+    input:
+        admix    = "popstructure/pcangsd/founders_K{k}.admix.{k}.Q",
+        metadata = "popstructure/metadata/founders.tsv",
+    output:
+        by_host = "popstructure/tables/founders_K{k}_by_host.tsv",
+    params:
+        prefix = "popstructure/tables/founders_K{k}",
+    log:
+        "logs/popstructure/summarize_K{k}.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        mkdir -p popstructure/tables
+        python scripts/summarize_admix_by_source.py \
+            --admix {input.admix} \
+            --metadata {input.metadata} \
+            --output-prefix {params.prefix} \
+            > {log} 2>&1
+        """

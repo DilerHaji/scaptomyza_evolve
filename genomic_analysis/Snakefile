@@ -1,0 +1,353 @@
+configfile: "config.yml"
+
+
+include: "rules/wildcards.smk" 
+include: "rules/common.smk"
+
+##### Preprocessing 
+# include: "rules/repeat.smk"
+# include: "rules/freebayes.smk"
+# include: "rules/freebayes_bam.smk"
+# include: "rules/freebayes_plots.smk"
+# include: "rules/indelrealign.smk"
+# include: "rules/bam.smk"
+# include: "rules/sync.smk"
+# include: "rules/pileup.smk"
+# include: "rules/sample_variance.smk"
+# 
+# ##### Variant Calling 
+# include: "rules/poolsnp.smk"
+# include: "rules/poolsnp_postprocessing.smk"
+# include: "rules/neff.smk"
+# include: "rules/pfilter.smk"
+# include: "rules/fvariants_parallel.smk"
+# include: "rules/fvariants_postprocessing.smk" # used to make grenedalf stuff and sync (eg, for haplovalidate)
+
+##### delta ######
+# include: "rules/freq_new.smk"
+
+
+#####  haplotype inference from temporal frequencies 
+
+
+##### GLM and delta
+# include: "rules/glm_parallel.smk"
+# include: "rules/glm_permuted_parallel.smk"
+# include: "rules/glm_plots_parallel.smk"
+# include: "rules/glm.smk"
+# include: "rules/glm_permuted.smk"
+# include: "rules/glm_plots.smk"
+# include: "rules/wglm/wglm.smk"
+# include: "rules/wglm/wglm_permuted.smk"
+# include: "rules/wglm/wglm_plots.smk"
+# include: "rules/gglm/gglm.smk"
+# include: "rules/gglm/gglm_permuted.smk"
+# include: "rules/gglm/gglm_plots.smk"
+# include: "rules/cglm/cglm.smk"
+# include: "rules/cglm/cglm_permuted.smk"
+# include: "rules/cglm/cglm_plots.smk"
+
+# include: "rules/lrt.smk"
+# include: "rules/lrt_genome_wide.smk"
+
+# include: "rules/dg.smk"
+# include: "rules/delta.smk"
+# include: "rules/ly.smk"
+# include: "rules/glm2/glm2.smk"
+# include: "rules/glm2/glm2_permuted.smk"
+# include: "rules/glm2/glm2_plots.smk"
+
+#####  Population Differentiation 
+# include: "rules/poolsnpPCA.smk"
+# include: "rules/fvariantsPCA.smk"
+# include: "rules/pca.smk"
+# include: "rules/pca_delta.smk"
+# include: "rules/pca_ly.smk"
+# includ: "rules/pca_lync"
+# include: "rules/fstat.smk"
+# include: "rules/fstat2.smk"
+## include: "rules/grenedalf.smk"
+include: "rules/grenedalf_interval.smk"
+include: "rules/grenedalf_diversity.smk"
+# include: "rules/grenedalf2.smk"
+# include: "rules/fst_slope.smk"
+# include: "rules/pbs.smk"
+include: "rules/pbs_mixture.smk"
+# include: "rules/pbe2_pipeline.smk"  # not in this release (cut analysis; rule file not shipped)
+# include: "rules/cmh.smk"
+
+# include: "rules/go.smk"
+
+##### Simulation of genomes
+# include: "rules/mimicree.smk"
+# include: "rules/focused_mimicree_pbs.smk"  # not in this release (cut analysis; rule file not shipped)
+
+
+# Tajimas's D 
+
+# Individual sequencing 
+
+##### Work in Progress
+# include: "rules/pileup.smk"
+# include: "rules/sync.smk"
+# include: "rules/subsample.smk"
+# include: "rules/frequency.smk"
+# include: "rules/levene.smk"
+# include: "rules/random_windows/subsample_random.smk"
+# include: "rules/random_windows/frequency_random.smk"
+# include: "rules/random_windows/levene_random.smk"
+# include: "rules/slim/slimulation.smk"
+# include: "rules/viz.smk"
+# include: "rules/grenedalf_fst.smk"
+#include: "rules/snape.smk" #unchanged
+#include: "rules/neff_postprocessing.smk" #previous version of neff got split
+#include: "rules/fvariants.smk" # non-parallel version
+#include: "rules/haplovalidate.smk"
+# include: "rules/poolSeq.smk" #unchanged 
+# include: "rules/tajimas.smk"
+# include: "rules/ind.smk"
+
+
+######## Final plots 
+# include: "rules/final_plots.smk"
+# include: "rules/final_fst_glm_mixture_scan_Fig3_new.smk"
+# include: "rules/pbs_timeslice_heatmap.smk"  # not in this release (cut analysis; rule file not shipped)
+# include: "rules/pbs_gen_comparison_rule.smk"  # not in this release (cut analysis; rule file not shipped)
+# include: "rules/pbs_g10_snapshot.smk"  # not in this release (cut analysis; rule file not shipped)
+include: "rules/fst_bt_temporal_manhattan.smk"
+# include: "rules/pbs_temporal_raw_multiplot.smk"  # not in this release (cut analysis; rule file not shipped)
+include: "rules/baypass_manhattan.smk"
+# include: "rules/baypass_pbs_sweep.smk"  # not in this release (cut analysis; rule file not shipped)
+include: "rules/baypass_wild.smk"
+
+# rule all_timeslice_multiplots — not in this release: depends on _TS_SWEEP, which is
+# defined only in the unshipped rules/pbs_timeslice_heatmap.smk (cut analysis).
+# rule all_timeslice_multiplots:
+#     input:
+#         [f"final_plots/pbs_timeslice/sweep/pbsn1/{sd}/{sv}/timeslice_multiplot.png"
+#          for (sd, sv) in _TS_SWEEP]
+# include: "rules/pbs_standalone_plot_rule.smk"
+# include: "rules/pbs_standalone_plot_rule_v2.smk"
+# ## include: "rules/pbs_gen_comparison_rule.smk"  # now included above (needed for gen_agg rule)
+# include: "rules/divergence_viz.smk"
+# include: "rules/pbs_pca.smk"
+
+localrules:
+    all,
+    #get_all_intervals
+     
+rule all:
+    input: 
+        #"repeat/" + config["reference_genome_name"] + ".out",
+        #"repeat_masker/" + config["reference_genome_name"] + ".fa.gff"
+        #"reference.bed"
+        #fst=expand(os.path.join(config["grenedalf"]["out_dir_fst"], "{fst}.done"), fst=FST),
+        #figure=expand(os.path.join(config["grenedalf"]["out_dir_fst"] + "_manhatten", "{fst_map}.png"), fst_map=FST_MAP),
+        #plot_fst=expand(os.path.join(config["grenedalf"]["out_dir_fst"] + "_manhatten", "{fst}.png"), fst=FST)
+        #expand("realigned/{bam}.bam", bam=BAM)
+        #expand("realigned/{merge}_merged.bam", merge=MERGE)
+        #expand(os.path.join(config["grenedalf"]["out_dir"], "{fst}.done"), fst=FST),
+        ####################################
+        #### Pileups #####
+        ####################################
+        #expand("gather_pileup/{pileup}.mpileup", pileup=PILEUP)
+        #"sample_sync/pileupALL.sync",
+        ####################################
+        #### Preprocessing ####
+        ####################################
+        #expand("freebayes/gathered_{fb}.vcf", fb=FB),
+        #expand("freebayes_plots/qual_hist/{fb}.png", fb=FB),
+        #expand("freebayes/bams/{fb}.filtered.bam", fb = FB),
+        #expand("variants/poolsnp/{bam}.vcf", bam=BAM)
+        #expand("variants/snape/{bam}.vcf", bam=BAM)
+        #expand("variants/snape_hist/{bam}_1.png", bam=BAM)
+        #expand("variants/poolsnp_biallelic/{poolsnp}.variants", poolsnp=POOLSNP)
+        #expand("variants/poolsnp_ncorrect/{poolsnp}.csv", poolsnp=POOLSNP)
+        #expand("variants/poolsnp/{poolsnp}.combined.vcf.gz", poolsnp=POOLSNP)
+        #expand("variants/poolsnp/{poolsnp}.combined.vcf.gz", poolsnp=POOLSNP)
+        #expand("variants/poolsnp/{poolsnp}.variants", poolsnp=POOLSNP),
+        #"final_variants.txt"
+        #expand("{variants}_final_variants.txt", variants=VARIANTS),
+        #expand("fvariants/{fvar}/all.done", fvar=FVAR)
+        #expand("fvariants/{fvar}.positions", fvar=FVAR)
+        #expand("fvariants/{fvar}.combined.vcf.gz", fvat=FVAR)
+        # "chrom_batch1.txt"     
+        #expand("glm/preprocessing1_tmp/{poolsnp}.done", poolsnp=POOLSNP)
+        #expand("preprocessing1/{poolsnp}.done", poolsnp=POOLSNP)
+        #expand("fvariants/{fvar}.combined.vcf.gz", fvar=FVAR)
+        ####################################
+        ##### Delta #####
+        ####################################
+        #expand("freq/{pileup}/{entry}_frequency.csv", pileup=PILEUP, entry=ENTRY)
+        ####################################
+        #### Tajimas D         
+        ####################################
+        #expand("taj_done/{taj}.done", taj=TAJ),
+        #expand("taj/{taj}.mpileup", taj=TAJ)
+        ####################################
+        #### Simulation        
+        ####################################
+        #slim_ap=expand("slim/slim_ap/{slim_ap}.log", slim_ap=SLIM_AP)
+        ####################################
+        #### FST using PoolFstat
+        ####################################
+        #expand("fstat/pileup_{poolfstat}.done", poolfstat=POOLFSTAT)
+        #expand("fstat/plots/{poolfstat}.png", poolfstat=POOLFSTAT)
+        #expand("fstat/plots/{poolfstat}.png", poolfstat=POOLFSTAT)
+        ####################################
+        # FST GRENDALF
+        ####################################
+        #expand("grenfst/fst/{grenfst}.done", grenfst=GRENFST)
+        #expand("grenfst/fst/{grenfst}.plot.done", grenfst=GRENFST)
+        #expand("grenfst/fst_queue/{grenfst}.csv", grenfst=GRENFST),
+        #expand("grenfst/fst_queue_plot/{grenfst_multiplot}/multiplot.png", grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_slope/{grenfst_multiplot}/go_interval.csv", grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_slope/{grenfst_multiplot}/plot.png", grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_plot/{grenfst_multiplot}/multiplot.png",  grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_outflank/{grenfst_multiplot}", grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_outflank_plots/{grenfst_multiplot}", grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_slope/{grenfst_multiplot}/slope.csv", grenfst_multiplot=GRENFST_MULTIPLOT)
+        #expand("grenfst/fst_queue_slope/{grenfst_multiplot}/plot.png",  grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_resid/{grenfst_multiplot}/manhattan_clean.png",  grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/fst_queue_resid/{grenfst_multiplot}/xy_clean.png",  grenfst_multiplot=GRENFST_MULTIPLOT),
+        #expand("grenfst/scale_space_plots/{scale_group}.png", scale_group=SCALE_SPACE_GROUPS),
+        #expand("grenfst/scale_space_plots_resid/{scale_group}.png", scale_group=SCALE_SPACE_GROUPS),
+        #"grenfst/global_summary/combined_slopes.png",
+        #"grenfst/global_summary/combined_residuals.png",
+        #"grenfst/lmm_results/{grenfst_multiplot}/manhattan_consensus.png",
+        #"grenfst/global_summary/combined_lmm_zscores.png",
+        #expand("grenfst/pbs_plots/{grenfst_multiplot}.png", grenfst_multiplot=GRENFST_MULTIPLOT)
+        #expand("grenfst/pbs/{grenfst_multiplot}_summary.csv", grenfst_multiplot=GRENFST_MULTIPLOT)
+        ####################################
+        # PBS
+        ####################################        
+        #expand("grenfst/pbs_plots/{grenfst_multiplot}.png", grenfst_multiplot=GRENFST_MULTIPLOT),   
+        #expand("final_plots/divergence_scan/final_aligned_landscape_{glm}_extent_full.png", glm=GLM),
+        #expand("final_plots/fst_glm_mixture/final_aligned_landscape_{glm}.png", glm=GLM),
+        expand("final_plots/fst_glm_mixture/final_aligned_landscape_{glm}_pbs.png", glm=GLM),
+        expand("final_plots/fst_glm_mixture/final_aligned_landscape_{glm}_pbsn1.png", glm=GLM),
+        expand("final_plots/fst_glm_mixture/final_aligned_landscape_{glm}_pbe.png", glm=GLM),
+        expand("final_plots/fst_glm_mixture_new/final_aligned_landscape_{glm}_pbe2.png", glm=GLM),
+        #expand("grenfst/pbs_plots_m/{grenfst_multiplot}.png", grenfst_multiplot=GRENFST_MULTIPLOT)
+        ###################################
+        # Metrics 
+        ###################################
+        #expand("metrics/density/manhattan_density_{grenfst}.png", grenfst=GRENFST)
+        ####################################
+        # GO
+        ####################################   
+        #"go_compare.summary.csv"  
+        ####################################
+        # CMH tests (Popoolation version)
+        ####################################
+        #expand("cmh/corrected_{poolfstat}_" + config["cmh"]["correction"] + ".sync", poolfstat=POOLFSTAT) 
+        #expand("cmh_temp/filtered_{poolfstat}_" + config["cmh"]["correction"] + ".sync", poolfstat=POOLFSTAT)
+        #expand("cmh/all_{cmh}_" + config["cmh"]["correction"] + ".csv", cmh=CMH)
+        #expand("cmh/subsampled/all_{cmh}_" + config["cmh"]["correction"] + ".csv", cmh=CMH)
+        #expand("cmh/all_{cmh}_" + config["cmh"]["correction"] + ".csv", cmh=CMH),
+        #expand("cmh/plot_subsampled_" + config["cmh"]["correction"] + "_" + str(config["cmh"]["significance_threshold"]) + "/{cmh}_manhattan.png", cmh=CMH)
+        #expand("poolfstat/combined_{poolfstat}.sync", poolfstat=POOLFSTAT)
+        ####################################
+        ### original PCA on final variants
+        ####################################
+        #expand("pca/{pca}.vcf.gz", pca=PCA)
+        #expand("pfilterPCA/{pca}.combined.vcf.gz", pca=PCA)
+        #expand("pfilterPCA/plot_{pca}/g1.png", pca=PCA)
+        #expand("pfilterPCA/plot_{pca}/g1.png", pca=PCA),
+        #expand("poolsnpPCA/plot_{pca}/g1.png", pca=PCA)
+        #expand("pfilterPCAr/af_matrix/{pca}.csv", pca=PCA)
+        #expand("pfilterPCAr/plot_{pca}/g1.png", pca=PCA)
+        #expand("fvariantsr/pca/{fvar}_scores.csv", fvar=FVAR)
+        #expand("fvariantsr/plot_{fvar}/g1.png", fvar=FVAR)
+        #expand("pca/plot_{pca}/g1.png", pca=PCA)
+        ####################################
+        #### GLMs of allele frequencies 
+        ####################################
+        #expand("glm/preprocessing/{glm}.done", glm=GLM)
+        #expand("glm/haf/{glm}/merged_gethaf.Rdata",glm=GLM),
+        #expand("glm/haf/{glm}/merged_gethaf_neff.RDS",glm=GLM),
+        #expand("glm/lrt/{glm}/lrt_results.csv", glm=GLM),
+        #expand("glm_bootstrap_final/{glm}.csv", glm=GLM), 
+        ##expand("final_plots/fst_lrt_gw/final_aligned_landscape_{glm}.png", glm=GLM),
+        #expand("glm/glm/{glm}.csv", glm=GLM),
+        #expand("glm_final/{glm}.csv", glm=GLM),
+        #expand("glm/glm_with_freq/{glm}.csv", glm=GLM),
+        #expand("glm/glm_manhatten/{glm}.png", glm=GLM),
+        #expand("glm_subsets/{glm}.done", glm=GLM),
+        #expand("glm/{glm}_distributionsINT.png", glm=GLM)
+        #expand("glm_plots/glm_manhatten/{glm}.png", glm=GLM),
+        #expand("wglm_plots/glm_manhatten/{w}.png", w=W),
+        #expand("gglm_plots/glm_manhatten/{g}.png", g=G),
+        #expand("dg_plots/glm_manhatten/{dg}.png", dg=DG),
+        ####################################
+        #### Permuted GLM ####
+        ####################################
+        #expand("glm_permuted/glm/{glm}_all_permutations.done", glm=GLM)
+        #expand("glm_permuted/glm/{glm}_run_complete.done", glm=GLM)
+        #expand("glm_plots/{fdr_permuted}_fdr.png", fdr_permuted=FDR_PERMUTED),
+        #expand("glm_plots/{fdr_permuted}/manhatten.done", fdr_permuted=FDR_PERMUTED),
+        #expand("wglm_plots/{w}/{w}.done", w=W),
+        #expand("wglm_plots/{w}_fdr.png", w=W),
+        #expand("gglm_plots/{g}/{g}.done", g=G),
+        #expand("gglm_plots/{g}_fdr.png", g=G),
+        #expand("dg_plots/{dg}_fdr.png", dg=DG),
+        ####################################
+        #### haplovalidate ####
+        ####################################
+        ####################################
+        #### Delta ####
+        ####################################
+        #expand("delta/{delta}.csv", delta = DELTA),
+        #expand("lynch/{delta}.csv", delta = DELTA)
+        #expand("ne/lynch_{delta}.csv", delta = DELTA)
+        ####################################
+        #### delta pca ####
+        ####################################
+        #expand("pca_delta/plot_{pca}/g1.png", pca=PCA)
+        ####################################
+        #### lynch pca ####
+        ####################################
+        #expand("ne/{delta}.csv", delta=DELTA)
+        #expand("ly/{ly}.csv", ly=LY)
+        #expand("pca_ly/plot_{ly}/g1.png", ly=LY)
+        ####################################
+        #### poolSeq simulation
+        ####################################
+        #expand("poolsim/{poolsim}/base.RData", poolsim=POOLSIM)
+        #expand("poolsim/{poolsim}/sample.RData", poolsim=POOLSIM)
+        #expand("poolsim/{poolsim}/sample.RData", poolsim=POOLSIM)
+        #"results/combined_matrix.csv"
+        #expand("poolsim_results/{set_id}/combined_matrix.csv", set_id=[f"set{i}" for i in range(1, config["poolsim"]["sets"] + 1)])
+        #"poolsim_results/neff_mat.csv"
+        #expand("poolsim_results/{set_id}/plot.png", set_id=[f"set{i}" for i in range(1, config["poolsim"]["sets"] + 1)])
+        ####################################
+        #### Mimicree2 simulation
+        ####################################
+        #"mimicree/hap.csv",
+        #"mimicree/sim.csv"
+        #"mimicree/fst/all_sims_fst.csv"
+        #get_all_sim_slope_targets,
+        #get_all_sim_slope_plot_targets,
+        #expand("mimicree/all_{category}/plot.png", category=CATEGORIES)
+        #expand("{variants}_mimicree/sim.csv", variants=VARIANTS)
+        #expand("{variants}_mimicree/glm.png", variants=VARIANTS)
+        #expand("{variants}_mimicree/sim.csv", variants=VARIANTS)
+        #expand("{variants}_mimicree/allsub.done", variants=VARIANTS)
+        ####################################
+        #### Testing Levene Model using allele frequencies
+        ####################################
+        #expand(os.path.join(config["grenedalf"]["out_dir"], "freq/{freq_change}.csv"), freq_change=FREQ_CHANGE)
+        #expand(os.path.join(config["grenedalf"]["out_dir"], "levene/{levene}.csv"), levene=LEVENE),
+        #expand(os.path.join(config["grenedalf"]["out_dir"], "levene_random/{levene_random}.csv"), levene_random=LEVENE_RANDOM)
+        #### Individual Sequencing #### 
+        #expand("{ind}_sync.done", ind=IND)
+        ####################################
+        #### final plots
+        ####################################
+        #expand("final_plots/fst_glm/final_aligned_landscape_{glm}.png", glm=GLM)
+        #expand("final_plots/fst_glm/final_aligned_landscape_{glm}.png", glm=GLM),
+        #expand("final_plots/fst_glm_interactive/{glm}/aligned.png", glm=GLM),
+        #expand("final_plots/divergence_sensitivity_{glm}", glm=GLM),
+        #expand("final_plots/zoomed_plots_bootstrap_lrt/{glm}", glm=GLM),
+        #expand("final_plots/fst_glm_loo/{glm}/aligned_loo.png", glm=GLM)
+        ##########################################################expand("final_plots/zoomed_plots_bootstrap/{glm}", glm=GLM)

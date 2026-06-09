@@ -1,0 +1,1116 @@
+# =================================================================================================
+#     Input Data
+# =================================================================================================
+
+# Set the input data, using absolute file paths (relative paths do not work well with some
+# of the snakemake tools we are using in the pipeline, such as shadow directories).
+data:
+
+  # Needed. Samples table that lists all samples with their units (re-sequencing runs) and fastq files.
+  # The path to the table file itself, as well as the paths to the fastq files within the table need
+  # to be absolute! No relative paths (e.g., `../data`), and no paths using shortcuts such as `~`.
+  # See the wiki (https://github.com/lczech/grenepipe/wiki) for the expected format.
+  samples-table: "PATH/TO/DATA/pool_variation/samples_pool_variation.tsv"
+
+  # Needed. Path to the reference genome in fasta format.
+  # Path needs to be absolute! No relative path (e.g., `../ref`), and no paths using shortcuts
+  # such as `~`.
+  # We expect that each sequence in the file represents a chromsome, contig, or scaffold.
+  # For genomes that are not fully assembled but consist of many small scaffolds,
+  # see the `contig-group-size` option below to help increase computational speed.
+  reference-genome: "PATH/TO/DATA/sfla_v2.fa"
+
+  # Optional. Path to any database of known variants (in vcf or vcf.gz format),
+  # ideally as it is provided by the GATK bundle.
+  # Use an empty list or string instead, if there is no reference of known variants or if you
+  # want to call variant without this guided approach. Path needs to be absolute, as above.
+  known-variants: ""
+
+  # Optional. Number of distinct samples that are expect to be in the above samples table.
+  # This serves as a consistency check, and is recommended to use, but not necessary.
+  # If set to a value other than 0, we check that the number of samples matches this number.
+  # In particular, when creating the samples table above, it can accidentally happen that samples
+  # are forgotten; or that multiple re-sequencing runs of the same biological sample are treated
+  # as distinct samples, instead of different units of the same sample, if the `unit` column in
+  # the samples table is not set correctly.
+  # To avoid these mistakes, set this value to the expected number of distinct biological samples,
+  # which should then also correspond to the expected number of columns in the final vcf.
+  # For instance, in a samples table with no re-sequenced samples, where all entries in the `units`
+  # column are 1, the number of rows in the table corresponds to the number of samples.
+  samples-count: 18
+
+# =================================================================================================
+#     Pipeline Settings
+# =================================================================================================
+
+settings:
+
+  # ----------------------------------------------------------------------
+  #     Basic Steps
+  # ----------------------------------------------------------------------
+
+  # Select the tool used for read trimming.
+  # Valid values: "adapterremoval", "cutadapt", "fastp", "seqprep", "skewer", "trimmomatic".
+  # Note that seqprep can only handle paired end reads.
+  trimming-tool: "fastp"
+
+  # Select whether to merge paired end reads into a single read while trimming.
+  # Only works with adapterremoval, fastp, and seqprep;
+  # cannot be used with cutadapt, skewer, or trimmomatic, as those do not support merging reads.
+  merge-paired-end-reads: false
+
+  # Select the tool used for read mapping.
+  # After the mapping, we always sort by genomic coordinate, and merge the units of a sample into
+  # one bam file, so that all downstream processes only work on one file per sample.
+  # Valid values: "bwamem", "bwamem2", "bwaaln", "bowtie2"
+  mapping-tool: "bwamem"
+
+  # After the above mapping, and before any subsequent steps (deduplication, variant calling etc),
+  # apply a filtering step using `samtools view`. If set to `true`,
+  # use 'params: samtools: view' below to set the actual filtering parameters being used.
+  # This step is for example useful when working with ancient DNA or pool sequencing data,
+  # where such filtering is common.
+  filter-mapped-reads: true
+
+  # Furthermore, after mapping, and potentially after filtering if activated above, but again
+  # before subsequent steps (deduplication, variant calling etc), clip overlapping reads,
+  # using BamUtil clipOverlap.
+  # Using the base calls from both forward and backward reads of paired end files might violate the
+  # implicit assumption of genotype likelihood models of downstream callers: that each read
+  # represents unique insert information. This might bias the genotype likelihoods, particularly
+  # in low coverage settings.
+  #
+  # In other words, from Lou et al. 2021 (DOI:10.22541/au.160689616.68843086/v4):
+  # > If the DNA insert in a library fragment is shorter than the combined length of paired reads,
+  # > there will be a section of overlap between the forward and reverse reads. While some variant
+  # > callers (e.g., gatk) account for the pseudoreplication in overlapping ends of read pairs,
+  # > the current implementation of angsd treats each end of a read pair as independent (this may
+  # > change in a future release (T. Korneliussen, personal communication)).
+  # > When treated as independent, read support for overlapping sections will be “double counted,”
+  # > which may bias genotype likelihoods. A conservative approach is to soft-clip one of the
+  # > overlapping read ends.
+  #
+  # We hence offer this clipping step, to remove any potential overlap between paired reads.
+  # If set to `true`, use `params: bamutil` below to set additional parameters for this step.
+  # Using this option can lead to one of the read mates being fully soft clipped (if the respective
+  # other read is of higher quality), which will cause picard MarkDuplicates to fail;
+  # if duplicate removal is however still necessary, you can silence this with the additional
+  # setting `VALIDATION_STRINGENCY=SILENT` for picard MarkDuplicates, in its settings below.
+  clip-read-overlaps: false
+
+  # After the above steps (mapping, and potentially filtering and/or clipping),
+  # select whether to mark and remove duplicates after mapping,
+  # using either picard/markduplicates or dedup, depending on "settings: duplicates-tool"
+  remove-duplicates: true
+
+  # Select the tool to mark duplicates, when `remove-duplicates` above is set to `true`.
+  # See the respective `params` sections below for setting the parameters for the chosen tool.
+  # Note that DeDup expects certain name prefixes for the reads, and is mainly designed for merged
+  # pair end reads; see https://github.com/apeltzer/DeDup
+  # Valid values: "picard", "dedup"
+  duplicates-tool: "picard"
+  
+  # Select whether to recalibrate base frequencies after mapping (in fact, after all the above
+  # steps that might include filtering and duplicate removal), using gatk/baserecalibrator.
+  # If set to true, "data: known-variants" has to be provided as well above.
+  # Furthermore, either the samples table (as provided via "data: samples-table") needs to contain
+  # a `platform` column containing the sequencing platform/instrument for each sample,
+  # or the setting "params: gatk: platform" has to be set below to one of the valid platform values,
+  # which is then used for all samples.
+  # As far as we are aware, valid platform values (in either the table or the setting) are
+  # "CAPILLARY", "LS454", "ILLUMINA", "SOLID", "HELICOS", "IONTORRENT", "ONT", "PACBIO".
+  # Others might work as well, depending on GATK BaseRecalibrator.
+  recalibrate-base-qualities: false
+
+  # Select the tool used for SNP calling.
+  # Valid values: "haplotypecaller" (for GATK HaplotypeCaller), "bcftools", "freebayes".
+  # This produces a VCF file "genotyped/all.vcf.gz" containing all samples and all positions.
+  # Note that when using bcftools here, we recommend to also use bcftools for the variant filtering
+  # below (see `filter-variants`), as it uses different VCF annotations than GATK for the filters.
+  calling-tool: "haplotypecaller"
+
+  # For some reference genomes, not all chromosomes/contigs have been fully assembled yet,
+  # and instead the reference genome consists of many small contigs/scaffolds.
+  # As some of the steps in the workflow however parallelize over contigs (for speed),
+  # this can lead to a large number of jobs being created, which in particular can cause issues
+  # when running in cluster environments.
+  #
+  # Hence, we offer this setting to combine small contigs/scaffolds for the computation.
+  # This does not change the results (which will still contain each of them as a separate contig),
+  # but merely combines them for the computation.
+  #
+  # If set to a size greater than 0, small contigs/scaffolds are combined into bins,
+  # so that the sum of lengths (in basepairs) of contigs in each bin is smaller than the given size,
+  # while optimizing for a minimum number of bins (bin packing problem), that is, minimizing number
+  # of compute jobs that need to be executed. Contigs that are already longer than the given size
+  # (e.g., if some chromosomes are already fully assembled) are not affected by this, and will just
+  # get their own bin. We never split contigs further down, meaning that the computational resources
+  # needed for a particular dataset are lower bound by the largest contig. Combining contigs into
+  # bins increases the resources (time and memory) needed to process the bin, but reduces the
+  # overall number of compute tasks/jobs, so this is a tradeoff to be made depending on your data
+  # and available compute resources.
+  #
+  # Rule of thumb: If you have many small contigs and want to use this feature, you can set the
+  # value to roughly the size of an actual chromosome of your species. This should give a total
+  # number of bins that is approximately equal to the number of chromosomes (if they were fully
+  # assembled), with each bin (that is, each computational job) containing contigs whose length in
+  # sum is approximately the size of a chromosome.
+  #
+  # Note that this contig group size is measured in basepairs (or nucleotides), and hence is not
+  # the number of bins to create, but the size of each. So, for example, when your genome has a
+  # total length of 100,000,000 bp, scattered into 5,000 scaffolds of (on average) 20,000 bp, you
+  # could set the `contig-group-size` to 100,000,000 / 10 = 10,000,000 (or a bit more) in order
+  # to create 10 groups of contigs (bins) for the computation, each one representing ~10,000,000 bp
+  # of contigs. Then, each group contains about 5,000 / 10 = 10,000,000 / 20,000 = 500 contigs
+  # (on average).
+  contig-group-size: 15000000
+
+  # EXPERIMENTAL.
+  # Path to a `bed` file with, e.g., captured regions, in order to restrict the variant calling
+  # to just these regions. If empty (default), the whole reference genome is used.
+  # Excludes to use `contig-group-size` at the moment.
+  #
+  # Note: Currently, this only is tested with calling-tool: "haplotypecaller", and both bcftools
+  # and freebayes fail if not all contigs/chromosomes of the reference genome are present in the
+  # regions file (they cannot handle empty contigs). Both might still work as long as the provided
+  # bed file contains regions of each chromosome that have some reads mapped to them,
+  # but we did not fully test this.
+  # If you need to restrict regions with one of those callers and run into trouble, please submit
+  # an issue to https://github.com/lczech/grenepipe/issues and we will see what we can do.
+  #
+  # See https://gatkforums.broadinstitute.org/gatk/discussion/4133/when-should-i-use-l-to-pass-in-a-list-of-intervals
+  # for details on the usage of regions with GATK HaplotypeCaller.
+  restrict-regions: ""
+
+  # The variant calling step above produces an unfiltered VCF file in "genotyped/all.vcf.gz".
+  # With this additional step here, this file can be filtered, e.g., to exclude low quality SNPs,
+  # producing a second VCF file in "filtered/all.vcf.gz".
+  # Valid values to select the variant filtering tool:
+  #  - "gatk-variantfiltration", to run GATK VariantFiltration. This is the default.
+  #    See below `params: gatk-variantfiltration` for the detailled filter settings.
+  #  - "gatk-vqsr", to run GATK VariantRecalibrator/ApplyVQSR to apply machine learning base
+  #    recalibration (GATK VQSR) of quality scores instead of hard filtering.
+  #    See below `params: gatk-vqsr` for the detailled filter settings.
+  #  - "bcftools-filter", to run bcftools filter, which is recommended when using bcftools call
+  #    for variant calling (as specified above in `calling-tool`).
+  #    See below `params: bcftools-filter` for the detailled filter settings.
+  #  - "none", to not run this step at all. In that case, the unfiltered VCF will also be used
+  #    for the annotations (SnpEff and VEP), and statistics (bcftools stats).
+  filter-variants: "gatk-variantfiltration"
+
+  # Keep or remove intermediate files.
+  # This is a housekeeping setting to save disk storage space. By default, we keep (almost) all
+  # intermediate files, so that the pipeline can easily continue and that any file can be
+  # inspected manually when problems occur. Using the below settings, this can be changed, and
+  # large intermediate files will be deleted once they are no longer needed by any downstream job
+  # (that is, if all files that need them have been successfully created).
+  # At the moment, we only offer this coarse granularity. For example, with `mapping == False`,
+  # all mapping-related bam files will be removed (including the read filtered, clipped, and
+  # duplicate removed bam files, for instance, if those options are activated above).
+  # Note that we only remove the large data files, while often index files, additional logs, etc,
+  # will remain, as they are mostly created incidentally by the tools in the pipeline.
+  # Alternatively, instead of using these options here, it is also possible to manually delete
+  # intermediate files after the pipeline has completed steps that depend on them - snakemake
+  # is able to handle this as well.
+  keep-intermediate:
+    trimming: true
+    mapping: true
+    calling: true
+    filtering: true
+
+  # ----------------------------------------------------------------------
+  #     Optional Steps
+  # ----------------------------------------------------------------------
+
+  # Set to true in order to annotate the variant calls with SnpEff.
+  # If used, make sure to set the correct database entry for SnpEff below in the params.
+  # Set to false when using the workflow to only obtain quality control statistics,
+  # as otherwise the whole pipeline will be run regardless.
+  snpeff: false
+
+  # Set to true in order to annotate the variant calls with VEP.
+  # If used, make sure to set the correct species entry for VEP below in the params,
+  # and all other desired settings and plugins for VEP.
+  # Set to false when using the workflow to only obtain quality control statistics,
+  # as otherwise the whole pipeline will be run regardless.
+  vep: false
+
+  # If activated, bcftools stats is run on the filtered VCF file, and its output added to the
+  # MultiQC report. Note that this requires the variant calling step - if you are working with
+  # ancient DNA, you might want to deactivate this step, so that you can get the MultiQC report
+  # for all other tools, without having to run the variant calling.
+  bcftools-stats: true
+
+  # Set to true in order to run mapDamage.
+  # See below `params: mapdamage` for additional settings.
+  mapdamage: false
+
+  # Set to true in order to run DamageProfiler.
+  # See below `params: damageprofiler` for additional settings.
+  damageprofiler: false
+
+  # Optionally, we can create (m)pileup files based on the mapping result.
+  # The bam files that these pileups are based on are the ones that are also used for the variant
+  # calling, and hence depend on the above choices. So, they will either just use the basic mapped
+  # reads, the samtools filtered bams (e.g., for ancient DNA) if `filter-mapped-reads` is set,
+  # the duplicate-marked bams if `remove-duplicates` is set, or the base quality recalibrated bams
+  # if `recalibrate-base-qualities` is set, in that order of processing.
+  #
+  # When deciding to create pileups, we can further choose to merge certain bams beforehand.
+  # By default, we do not make any pileup files (the empty list `[]`). To produce pileup files,
+  # remove the empty list brackets, and uncomment the types of pileups that you need, as listed
+  # (with explanations) below.
+  pileups: ["all-samples"]
+    # Make one pileup file per sample (with all units of each sample merged into one pile).
+    # - "individual-samples"
+    #
+    # Make a pileup file containing columns for each sample (with units per sample merged).
+    # This also creates a file "mpileup/all-sample-names.txt", which lists the order of the
+    # pileup columns in the file, which is the same order as the `data: samples-table` input table
+    # (the order in which each sample name appears first in the table, forsamples with multiple units).
+    # - "all-samples"
+    #
+    # Make a pileup file with one column only, by merging all samples with all units into one pile.
+    # - "all-merged-samples"
+
+  # Set to true in order to run HAF-pipe to estimate haplotype-inferred allele frequencies
+  # from pool-seq data and founder SNP profiles.
+  # See `params: hafpipe` below for details and for the settings that need to be provided.
+  # Alternatively, if you just want to run HAF-pipe (and all necessary steps before that, such as
+  # mapping the reads), instead of the whole pipeline, you can also call snakemake directly with
+  # the special target "all_hafpipe" (just append that to the end of your usual snakemake call),
+  # which will just run the steps necessary to create the HAF-pipe files.
+  hafpipe: false
+
+  # Set to true to compute a table of allele frequencies from the filtered vcf,
+  # using the `AD` (allelic depth) field of the vcf for each sample to compute the total count
+  # (coverage), frequency of REF/(REF+ALT) counts, and REF and ALT counts, for biallelic SNP sites.
+  # Note that this table only contains sites that are present in the filtered vcf.
+  # Hence, for pool sequencing data, you also should consider to set thresholds for the calling
+  # to low values so that sites are considered as variants that have low frequency alleles in the
+  # pool. Typically, when working with individuals instead of pooled data, such sites would rather
+  # be considered sequencing errors instead of low frequencies.
+  frequency-table: true
+
+  # If the above flag is set to true, this comma separated list is used to decide which values
+  # to put into the table. Valid values: "COV,FREQ,REF_CNT,ALT_CNT"
+  frequency-table-fields: "COV,FREQ,REF_CNT,ALT_CNT"
+
+# =================================================================================================
+#     Tool Parameters
+# =================================================================================================
+
+params:
+
+  # ----------------------------------------------------------------------
+  #     adapterremoval
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == adapterremoval
+  # See adapterremoval manual: https://adapterremoval.readthedocs.io/en/latest/
+  # and https://adapterremoval.readthedocs.io/en/latest/manpage.html
+  adapterremoval:
+    threads: 4
+
+    # Extra parameters for single reads. Param `--gzip` is alreaday set internally.
+    se: ""
+
+    # Extra parameters for paired end reads. Param `--gzip` is alreaday set internally,
+    # as well as `--collapse` if settings:merge-paired-end-reads is set to true above.
+    pe: ""
+
+  # ----------------------------------------------------------------------
+  #     cutadapt
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == cutadapt
+  # See cutadapt manual: https://cutadapt.readthedocs.io/en/stable/guide.html#adapter-types
+  cutadapt:
+    threads: 4
+
+    # Set the adapters and any extra parameters.
+    # For example, adapters: "-a AGAGCACACGTCTGAACTCCAGTCAC -g AGATCGGAAGAGCACACGT -A AGAGCACACGTCTGAACTCCAGTCAC -G AGATCGGAAGAGCACACGT"
+    # extra: "--minimum-length 1 -q 20"
+
+    # Extra parameters for single reads.
+    se:
+      adapters: "-a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC"
+      extra: "-q 20"
+
+    # Extra parameters for paired end reads.
+    pe:
+      adapters: "-a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC"
+      extra: "-q 20"
+
+  # ----------------------------------------------------------------------
+  #     fastp
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == fastp
+  # See fastp manual: https://github.com/OpenGene/fastp
+  fastp:
+    threads: 4
+
+    # Extra parameters for single reads.
+    se: ""
+
+    # Extra parameters for paired end reads.
+    pe: "--detect_adapter_for_pe \
+    --trim_poly_g --poly_g_min_len 10 \
+    --cut_front --cut_front_window_size 4 \
+    --cut_front_mean_quality 25 \
+    --cut_tail \
+    --cut_tail_window_size 4 \
+    --cut_tail_mean_quality 20 \
+    --length_required 60 \
+    --trim_front1 6 \
+    --trim_front2 8"
+
+  # ----------------------------------------------------------------------
+  #     seqprep
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == seqprep
+  # See seqprep manual: https://github.com/jstjohn/SeqPrep
+  seqprep:
+
+    # Extra parameters to use, e.g., adapter sequences.
+    # We internally already set the inputs (-f, -r), and outputs (-1, -2, -3, -4, -s).
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     skewer
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == skewer
+  # See skewer manual: https://github.com/relipmoc/skewer
+  # By default, we internally already set the options `--format sanger --compress`
+  skewer:
+    threads: 4
+
+    # Extra parameters for single reads.
+    se: "--mode any"
+
+    # Extra parameters for paired end reads.
+    pe: "--mode pe"
+
+  # ----------------------------------------------------------------------
+  #     trimmomatic
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:trimming-tool == trimmomatic
+  # See trimmomatic manual: http://www.usadellab.org/cms/?page=trimmomatic
+  trimmomatic:
+    threads: 6
+    se:
+      extra: ""
+      trimmer:
+        - "LEADING:3"
+        - "TRAILING:3"
+        - "SLIDINGWINDOW:4:15"
+        - "MINLEN:36"
+    pe:
+      extra: ""
+      trimmer:
+        # We recommend playing with these settings, e.g., LEADING and TRAILING might be better at 5,
+        # and SLIDINGWINDOW might work better with, e.g., 4:20.
+        # Adapter sequences can also be provided as in the ILLUMINACLIP example below.
+        - "LEADING:3"
+        - "TRAILING:3"
+        - "SLIDINGWINDOW:4:15"
+        - "MINLEN:36"
+        # - "ILLUMINACLIP:/path/to/adapters/TruSeq3-PE-2.fa:2:30:10:2:True"
+
+  # ----------------------------------------------------------------------
+  #     bowtie2
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:mapping-tool == bowtie2
+  # See bowtie2 manual: http://bowtie-bio.sourceforge.net/bowtie2/index.shtml
+  bowtie2:
+    threads: 12
+
+    # Extra parameters. We internally already set `--rg` and `--rg-id`, using read group ("@RG")
+    # tags "ID" and "SM", and potentially "PL".
+    extra: ""
+
+    # Extra parameters for samtools sort, which we use after bowtie2 for sorting its output,
+    # can be set via `samtools: sort` below.
+
+  # ----------------------------------------------------------------------
+  #     bwa aln
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:mapping-tool == bwaaln
+  # See bwa manual: http://bio-bwa.sourceforge.net/
+  bwaaln:
+    threads: 4
+
+    # Extra parameters for bwa aln, which maps the reads and produces intermediate *.sai files.
+    extra: ""
+
+    # Extra parameters for bwa sam(se/pe), which turns the bwa aln (*.sai) files into bam files.
+    # We internally already set `-R` to use read group ("@RG") tags "ID" and "SM",
+    # and potentially "PL". Note that we use samse or sampe depending on which type each sample
+    # is (single-end or paired-end).
+    extra-sam: ""
+
+    # Extra parameters for samtools sort, which we use after bwa aln for sorting its output,
+    # can be set via `samtools: sort` below.
+
+  # ----------------------------------------------------------------------
+  #     bwa mem
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:mapping-tool == bwamem
+  # See bwa manual: http://bio-bwa.sourceforge.net/
+  bwamem:
+    threads: 12
+
+    # Extra parameters for bwa mem.
+    # We internally already set `-R` to use read group ("@RG") tags "ID" and "SM",
+    # and potentially "PL".
+    extra: ""
+
+    # Extra parameters for samtools sort, which we use after bwa mem for sorting its output,
+    # can be set via `samtools: sort` below.
+
+  # ----------------------------------------------------------------------
+  #     bwa mem2
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:mapping-tool == bwamem2
+  # See bwa manual: https://github.com/bwa-mem2/bwa-mem2
+  bwamem2:
+    threads: 12
+
+    # Extra parameters for bwa mem.
+    # We internally already set `-R` to use read group ("@RG") tags "ID" and "SM",
+    # and potentially "PL".
+    extra: ""
+
+    # Extra parameters for samtools sort, which we use after bwa mem2 for sorting its output,
+    # can be set via `samtools: sort` below.
+
+  # ----------------------------------------------------------------------
+  #     samtools
+  # ----------------------------------------------------------------------
+
+  # See http://www.htslib.org/doc/samtools.html
+  samtools:
+
+    # Extra paramters for the samtools/merge step per sample, combining all the units of a sample.
+    # Used for the merge step after mapping. We merge all bam files the same sample (all its units)
+    # before running any of the downstream steps (filtering, clipping, duplicate removel, etc),
+    # in order to streamline the process, and to make sure that all tools understand that all units
+    # of a sample belong to the same sample.
+    merge: ""
+    merge-threads: 4
+
+    # Extra parameters for samtools/view.
+    # Used only if settings:filter-mapped-reads == true, in order to filter the mapped samples
+    # (which at this point had their units merged by the above samtools merge step).
+    # These are the optional filtering criteria that are used beween mapping and subsequent steps.
+    # We internally always add `-b` to this, so that the output is in the binary format that we
+    # expect for our subsequent steps.
+    view: "-q 20"
+
+    # Extra parameters for the samtools/mpileup step.
+    # Used only if settings:pileups is not empty, that is, if pileup files are generated.
+    pileup: "-d 10000"
+
+    # Extra parameters for samtools sort, whereever it is used in the pipeline
+    # (e.g., after mapping, see above tools as well).
+    sort: "-m 4G"
+
+    # By default, we run the samtools stats and flagstat QC tools on the processed bam files after
+    # processing all (optional) steps (filtering, clipping, dedup, base recalibration).
+    # However, we can also run on the raw merged samples, where reads just have been mapped, sorted,
+    # and merged per sample (all units of a sample into one bam file), but before any other processing.
+    # Valid values: "processed", "merged"
+    stats-bams: "processed"
+    flagstat-bams: "processed"
+
+    # Temporary directory, used for example for samtools sort, which can cause trouble.
+    # Samtools sort creates temporary files that are not cleaned up when a cluster job runs out of
+    # time or otherwise fails, but which cause samtools to immediately terminate if called again.
+    # By default (empty), we use a system-specified temp directory.
+    temp-dir: ""
+
+  # ----------------------------------------------------------------------
+  #     BamUtil
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:clip-read-overlaps == true
+  bamutil:
+    # Set extra parameters to use for clipOverlap,
+    # see https://genome.sph.umich.edu/wiki/BamUtil:_clipOverlap for details.
+    # By default, we print the parameter settings and produce some statistics about the clipping,
+    # which will be located in the log file produced by the step.
+    extra: "--params --stats"
+
+  # ----------------------------------------------------------------------
+  #     picard
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:duplicates-tool == picard
+  picard:
+
+    # Extra parameters for MarkDuplicates.
+    # See https://gatk.broadinstitute.org/hc/en-us/articles/360057439771-MarkDuplicates-Picard
+    MarkDuplicates: "REMOVE_DUPLICATES=true VALIDATION_STRINGENCY=SILENT"
+
+    # Run several Picard QC tools, as needed, using Picard CollectMultipleMetrics.
+    # See https://gatk.broadinstitute.org/hc/en-us/articles/360042478112-CollectMultipleMetrics-Picard
+    CollectMultipleMetrics:
+      AlignmentSummaryMetrics: true
+      BaseDistributionByCycle: true
+      GcBiasMetrics: true
+      InsertSizeMetrics: true
+      QualityByCycleMetrics: true
+      QualityScoreDistributionMetrics: true
+      QualityYieldMetrics: true
+      # RnaSeqMetrics: false
+
+    # Extra parameters for CollectMultipleMetrics
+    CollectMultipleMetrics-extra: "VALIDATION_STRINGENCY=LENIENT METRIC_ACCUMULATION_LEVEL=null METRIC_ACCUMULATION_LEVEL=SAMPLE"
+
+    # By default, we run the picard CollectMultipleMetrics QC tool on the processed bam files after
+    # processing all (optional) steps (filtering, clipping, dedup, base recalibration).
+    # However, we can also run on just the merged samples, where reads just have been mapped, sorted,
+    # and merged per sample (all units of a sample into one bam file), but before any other processing.
+    # Valid values: "processed", "merged"
+    CollectMultipleMetrics-bams: "processed"
+
+    # For some specific error cases, it might be necessary to adjust java settings for the tools,
+    # such as `-Xmx10g` to increase the available memory within the Java virtual machine
+    # (because it limits itself otherwise, instead of using the available memory...).
+    # The last option, SortVcf-java-opts, is used by bcftools when using contig-group-size > 0.
+    MarkDuplicates-java-opts: "-Xmx10g"
+    CollectMultipleMetrics-java-opts: ""
+    SortVcf-java-opts: ""
+
+  # ----------------------------------------------------------------------
+  #     dedup
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:duplicates-tool == dedup
+  # See https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/dedupe-guide/
+  dedup:
+    # Extra settings to provide to DeDup
+    extra: "-m"
+
+    # Extra parameters for samtools sort, which we use after dedup for sorting its output,
+    # can be set via `samtools: sort` above.
+
+  # ----------------------------------------------------------------------
+  #     bcftools
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:calling-tool == bcftools
+  # See http://samtools.github.io/bcftools/bcftools.html
+  # Note that the bcftools filter step (if configured above via `settings: filter-variants`)
+  # is configured below in the `bcftools-filter` setting, instead of here.
+  bcftools:
+    threads: 8
+
+    # We offer two ways to run bcftools call: Combined on all samples at the same time,
+    # or on each sample individually, merging the calls later.
+    # Combined calling might yield calls of higher quality, as the caller can take information from
+    # all samples into account; however, bcftools can be prohibitively slow when using on too many
+    # samples at the same time.
+    # We hence offer invididual calling, which parallelizes over samples, and hence works for larger
+    # datasets.
+    # Valid values: "combined" (default), "individual"
+    mode: "combined"
+
+    # Extra parameters for the mpileup step.
+    mpileup: "--max-depth 10000"
+
+    # Extra parameters for the bcftools call step.
+    call: "--multiallelic-caller"
+
+    # Extra parameters for the bcftools stats step, if activated via `settings: bcftools-stats`.
+    # The result of this is also included in the MultiQC report.
+    stats: ""
+
+    # Extra parameters for the bcftools stats plot (`plot-vcfstats`) command.
+    # The output path `--prefix` is already set in the rule - do not specify this here;
+    # furthermore, do not set `--no-PDF`, as we rely on the PDF for the snakemake rule.
+    stats-plot: ""
+
+  # ----------------------------------------------------------------------
+  #     freebayes
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:calling-tool == freebayes
+  # See https://github.com/freebayes/freebayes
+  freebayes:
+
+    # Extra parameters for freebayes.
+    extra: ""
+
+    # Settings for parallelization
+    threads: 8
+    compress-threads: 2
+    chunksize: 100000
+
+  # ----------------------------------------------------------------------
+  #     gatk
+  # ----------------------------------------------------------------------
+
+  gatk:
+
+    # Used only if settings:recalibrate-base-qualities == true
+    # Extra parameters for BaseRecalibrator,
+    # see https://gatk.broadinstitute.org/hc/en-us/articles/360036898312-BaseRecalibrator
+    BaseRecalibrator: ""
+
+    # Futhermore, the BaseRecalibrator needs to know the sequencing platform, see
+    # https://gatk.broadinstitute.org/hc/en-us/articles/360035890671-Read-groups
+    # This can either be provided per-sample as a column in the samples table, or, if it is the
+    # same for all samples, provided here for all of them.
+    # As far as we are aware, valid platform values are
+    # "CAPILLARY", "LS454", "ILLUMINA", "SOLID", "HELICOS", "IONTORRENT", "ONT", "PACBIO"
+    # Others might work as well, depending on GATK BaseRecalibrator.
+    platform: ""
+
+    # Used only if settings:calling-tool == haplotypecaller
+    # Extra parameters for HaplotypeCaller and surrounding steps,
+    # see https://gatk.broadinstitute.org/hc/en-us/articles/360036803991-HaplotypeCaller
+    HaplotypeCaller-extra: ""
+    CombineGVCFs-extra: ""
+    GenotypeGVCFs-extra: ""
+
+    # For some specific error cases, it might be necessary to adjust java settings for the tools.
+    HaplotypeCaller-java-opts: ""
+    CombineGVCFs-java-opts: ""
+    GenotypeGVCFs-java-opts: ""
+
+    # Number of threads to use for the HaplotypeCaller. We recommend to keep this at 2,
+    # as GATK does not seem to do a great job of parallelizing anyway.
+    HaplotypeCaller-threads: 2
+
+  # ----------------------------------------------------------------------
+  #     GATK VariantFiltration
+  # ----------------------------------------------------------------------
+
+  # Used only if settings: filter-variants: "gatk-variantfiltration" is used.
+  # Uses the GATK VariantFiltration tool for hard filtering SNPs and INDELs, see
+  # https://gatk.broadinstitute.org/hc/en-us/articles/360037226192-VariantFiltration
+  # for the settings that can be provided here.
+  gatk-variantfiltration:
+
+    # Extra parameters for the hard filtering as outlined in GATK docs
+    # https://gatkforums.broadinstitute.org/gatk/discussion/2806/howto-apply-hard-filters-to-a-call-set
+    # The filtering is separated for SNPs/SNVs and indels.
+    SNP: "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+    INDEL: "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
+
+    # We also offer extra settings that are used for both.
+    extra: ""
+    java-opts: ""
+
+  # ----------------------------------------------------------------------
+  #     GATK VariantRecalibrator + ApplyVQSR
+  # ----------------------------------------------------------------------
+
+  # Used only if settings: filter-variants: "gatk-vqsr" is used,
+  # Uses the GATK VariantRecalibrator and ApplyVQSR tools for filtering SNPs and INDELs,
+  # see https://gatk.broadinstitute.org/hc/en-us/articles/360037594511-VariantRecalibrator
+  # and https://gatk.broadinstitute.org/hc/en-us/articles/360037226332-ApplyVQSR for the tools,
+  # and see https://gatk.broadinstitute.org/hc/en-us/articles/360035531612-Variant-Quality-Score-Recalibration-VQSR-
+  # for the workflow itself, including hints and tipps for the settings used here.
+  # According to their documentation, "VQSR is probably the hardest part [...] to get right",
+  # so you will likely need a few tries to get it to work properly.
+  # This is a complicated step that WILL NEED YOUR EXPERIMENTATION with settings to fully leverage
+  # the tool! Note that the settings here are solely used because they work for our test data,
+  # so that we can keep the tests simple. REPLACE WITH YOUR SETTINGS AS NEEDED!
+  gatk-vqsr:
+    # Resource settings and files, according to the documentation at
+    # https://gatk.broadinstitute.org/hc/en-us/articles/360036510892-VariantRecalibrator
+    # Note that the names (here, e.g., "1001G") are arbitrary, but need to match between
+    # the `resources` and the `resource-files` - that is, for every resource, there also needs to
+    # be an entry in `resource-files` below associated with it. Multiple resources can also be
+    # provided. We below also provide (commented out) the resources used in the GATK documentation,
+    # for reference.
+    resources:
+      # Example resource using a 1001G Arabidopsis thaliana VCF.
+      1001G:
+        - known: false
+        - training: true
+        - truth: true
+        - prior: 10.0
+
+      # Other examples, from the GATK documentation, for the human genome.
+      # - hapmap:
+      #   - known: false
+      #   - training: true
+      #   - truth: true
+      #   - prior: 15.0
+      # - omni:
+      #   - known: false
+      #   - training: true
+      #   - truth: false
+      #   - prior: 12.0
+      # - 1000G:
+      #   - known: false
+      #   - training: true
+      #   - truth: false
+      #   - prior: 10.0
+      # - dbsnp:
+      #   - known: true
+      #   - training: false
+      #   - truth: false
+      #   - prior: 2.0
+    resource-files:
+      # Example resource using a 1001G Arabidopsis thaliana VCF subset.
+      # We just re-use the known variants file here, for illustration and test purposes only.
+      1001G: "#BASEPATH#/test/reference/known-variants.vcf.gz"
+
+      # Other examples, from the GATK documentation, for the human genome.
+      # - hapmap: "hapmap_3.3.hg38.sites.vcf.gz"
+      # - omni: "1000G_omni2.5.hg38.sites.vcf.gz"
+      # - 1000G: "1000G_phase1.snps.high_confidence.hg38.vcf.gz"
+      # - dbsnp: "Homo_sapiens_assembly38.dbsnp138.vcf.gz"
+
+    # Provide the annotions of the VCF INFO field to be used for VQSR. These should match the fields
+    # that are actually available in your resource files.
+    annotation:
+      - "DP"
+      # - "QD"
+      # - "MQ"
+      # - "MQRankSum"
+      # - "ReadPosRankSum"
+      # - "FS"
+      # - "SOR"
+
+    # Extra command line params, and optional Java runtime options to provide
+    # to GATK VariantRecalibrator. We already set the --rscript-file internally for some plots
+    # of the recalibration (only gives plots for the SNPs though, according to GATK).
+    # We here set the gaussians to a very low value, simply for our test case to work, see
+    # https://gatk.broadinstitute.org/hc/en-us/community/posts/4408833794587-Insufficient-variance-error-for-VariantRecalibrator
+    # for details. We recommend to change this according to your actual needs.
+    extra-variantrecalibrator-SNP: "--max-gaussians 1"
+    extra-variantrecalibrator-INDEL: "--max-gaussians 1"
+    java-variantrecalibrator: ""
+
+    # Extra command line params, and optional Java runtime options to provide to GATK ApplyVQSR
+    extra-applyvqsr-SNP: "--truth-sensitivity-filter-level 99.0"
+    extra-applyvqsr-INDEL: "--truth-sensitivity-filter-level 99.0"
+    java-applyvqsr: ""
+
+  # ----------------------------------------------------------------------
+  #     bcftools filter
+  # ----------------------------------------------------------------------
+
+  # Used only if settings: filter-variants: "bcftools-filter" is used.
+  # See https://samtools.github.io/bcftools/bcftools.html#filter for the filter specifications.
+  # We recommend to use this when also using `bcftools call` for the variant calling, as these
+  # tools work better together. Combining bcftools calling with GATK filtering is difficult.
+  bcftools-filter:
+
+    # By default, when using this, we use the `bcftools filter` command;
+    # the `bcftools view` command provides similar functionalty, and can be used here instead.
+    # Valid valued: "filter", "view"
+    tool: "filter"
+
+    # Parameters to use for the filtering, separated for SNPs/SNVs and indels.
+    SNP: "-sFilterName -e'INFO/DP<5'"
+    INDEL: "-sFilterName -e'INFO/DP<5'"
+
+    # We also offer extra settings, used for both, e.g., for memory or tmp dir settings.
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     snpeff
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:snpeff == true
+  snpeff:
+
+    # Name of the reference genome. Only used if settings:snpeff is set to `true`.
+    # This has to be a valid SnpEff database genome name, see here for how to obtain a list:
+    # https://pcingola.github.io/SnpEff/se_buildingdb/
+    # Alternatively, when the below `custom-db-dir` is specified, this is ignored.
+    name: "Arabidopsis_thaliana"
+
+    # Set the directory to download the SnpEff database to.
+    # In many cases, this helps to avoid re-downloaded the database for every run of grenepipe.
+    # Hence we recommend to use absolute paths!
+    # If left blank, we use the same directory where the reference genome is located.
+    # This is ignored if a `custom-db-dir` is provided below.
+    download-dir: ""
+
+    # Instead of using one of the available online databases, use a custom local one.
+    # If set, the two options above, `name` and `download-dir`, are ignored, and instead,
+    # this local path is used, which is expected to contain a valid snpEff database.
+    custom-db-dir: ""
+
+    # Additional parameters for snpeff, see https://pcingola.github.io/SnpEff/se_commandline/
+    extra: "-Xmx4g"
+
+  # ----------------------------------------------------------------------
+  #     VEP
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:vep == true
+  vep:
+
+    # The VEP documentation is not really helpful when trying to find the cache sources
+    # for anything other than the Homo sapiens data. The list of Ensembl genomes can be found
+    # here: https://uswest.ensembl.org/info/docs/tools/vep/script/vep_cache.html,
+    # but it can be a bit tricky to find the exact names and the FTP download URL that need to be
+    # used here (see params below for details).
+    # Note that there seem to be two version numbers that are for different parts of their
+    # ecosystem, e.g., Ensembl release 104 / Ensembl Genomes 51, which is confusing.
+
+    # Ensembl species name
+    species: "arabidopsis_thaliana"
+
+    # Genome build
+    build: "TAIR10"
+
+    # Ensembl release version.
+    # Used for the species cache version and for the plugins download.
+    release: 104
+
+    # For non-metazoans, we need different download URLs for obtaining the Ensembl data,
+    # but it does not seem to be documented well where to find those URLs.
+    # Try http://uswest.ensembl.org/info/docs/tools/vep/script/vep_download.html#installer,
+    # and http://uswest.ensembl.org/info/docs/tools/vep/script/vep_cache.html#cache
+    # which list FTP directories for the Ensembl Genomes.
+    # Alternatively, try to find your desired species here: http://ftp.ebi.ac.uk/ensemblgenomes/pub/
+    # Then, use the FTP url here (instead of tht http URL) so that we can find and download the
+    # above species data.
+    # If left empty, we use the default URL as used by the VEP install script.
+    cache-url: "ftp://ftp.ebi.ac.uk/ensemblgenomes/pub/plants/current/variation/vep"
+
+    # Add any plugin from https://www.ensembl.org/info/docs/tools/vep/script/vep_plugins.html
+    # Plugin arguments can be passed as well, e.g. "LoFtool,path/to/custom/scores.txt",
+    # or via an entry "MyPlugin,1,FOO", see the documentation linked above.
+    plugins:
+      - LoFtool
+
+    # Set the directories to download the VEP species/cache/database and plugins to.
+    # In many cases, this helps to avoid re-downloaded the data for every run of grenepipe.
+    # Hence we recommend to use absolute paths!
+    # If left blank, we use the same directory where the reference genome is located.
+    cache-dir: ""
+    plugins-dir: ""
+
+    # Extra command line arguments (e.g. --sift, see docs) for the VEP annotation.
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     mapdamage
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:mapdamage == true
+  mapdamage:
+
+    # Additional parameters for mapdamage, see http://ginolhac.github.io/mapDamage/
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     damageprofiler
+  # ----------------------------------------------------------------------
+
+  # Used only if settings:damageprofiler == true
+  damageprofiler:
+
+    # Additional parameters for damageprofiler,
+    # see https://damageprofiler.readthedocs.io/en/latest/contents/generalUsage.html
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     fastqc
+  # ----------------------------------------------------------------------
+
+  # Used to produce statistics on the fastq files to find issues in the sequencing.
+  fastqc:
+
+    # Select input files for fastqc: either "samples" for the raw sequence input files,
+    # or "trimmed" for the fastq files resulting from the trimming step.
+    input: "trimmed"
+
+    # Additional parameters for fastqc
+    # See https://www.bioinformatics.babraham.ac.uk/projects/fastqc/
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     qualimap
+  # ----------------------------------------------------------------------
+
+  # Used to produce statistics on the mapping quality of the reads.
+  qualimap:
+
+    # By default, we run the qualimap QC tool on the processed bam files after
+    # processing all (optional) steps (filtering, clipping, dedup, base recalibration).
+    # However, we can also run on the raw merged samples, where reads just have been mapped, sorted,
+    # and merged per sample (all units of a sample into one bam file), but before any other processing.
+    # Valid values: "processed", "merged"
+    bams: "processed"
+
+    # Additional parameters for qualimap, see http://qualimap.conesalab.org/
+    extra: "--java-mem-size=64G"
+    threads: 2
+
+  # ----------------------------------------------------------------------
+  #     SeqKit
+  # ----------------------------------------------------------------------
+
+  # Used to deliver statistics on the reference genome.
+  seqkit:
+
+    # Additional parameter for SeqKit stats for the reference genome,
+    # see https://bioinf.shenwei.me/seqkit/usage/#stats
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     MultiQC
+  # ----------------------------------------------------------------------
+
+  multiqc:
+
+    # Additional parameter for multiqc, see https://multiqc.info/
+    # You can for example specify an additional MultiQC config file here, by using
+    # `--config /path/to/multiqc-config.yaml`.
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     HAFpipe
+  # ----------------------------------------------------------------------
+
+  # Used to calculate haplotype-inferred allele frequencies from pool-seq data and founder SNPs,
+  # see https://github.com/petrov-lab/HAFpipe-line and https://doi.org/10.1534/g3.119.400755
+  hafpipe:
+
+    # HAFpipe is a tool to compute improved allele frequencies for pool-seq data, using SNPs of
+    # the founder generation of the pools to calculate haplotype frequencies that yield better
+    # estimates of the later generations in, e.g., Evolve and Resequence experiments.
+    # HAFpipe is a bit tricky to use, as it runs separately on each chromosome. We here execute
+    # it for each chromosome (that is specified) and one merged bam file per sample, containing
+    # all its sequences (from paired ends and/or multiple units).
+
+    # The HAFpipe output format is pretty unfriendly, as it produces one file per sample and per
+    # chromosome, with no information on either the sample name or chromosome name within the file.
+    # Thus, only the file names themselves can be used to distinguish that, leaving the burding of
+    # bookkeeping with the user. Our implementation however offers a way out: We create a table
+    # that combines all these per-sample per-chromosome files into one file.
+    # That file will be located in "hafpipe/all.csv"
+
+    # List of chromosomes of the reference genome for which we want to run HAFpipe.
+    # If left empty (default), all chromosomes are used. We however recommend to exclude
+    # chromosomes such as chloroplast or mitochondria, and to exclude small unassembled contigs.
+    # Can be provided as a yaml list `[ "1", "2" ]`, or as separate lines following
+    # the `chromosomes:` line, indented and with dashes in front.
+    chromosomes: []
+
+    # The multi-sample VCF file of each individual founder in the starting population,
+    # which will be converted to a snp table in Task 1 (in HAFpipe, this is the `--vcf` option).
+    founder-vcf: ""
+
+    # Directory where to store the SNP tables of Task 1 of HAFpipe.
+    # If left empty (default), we use a directory within the run of grenpipe.
+    # However, as the SNP tables only have to be computed once per founder VCF,
+    # this directory can be specified to allow re-using the tables (also with Task 2, see below).
+    # If the respective tables are found in that directory, Task 1 is not executed again;
+    # the tables are named `{chrom}.csv`, for the chromsomes as provided above.
+    # We recommend to set this to a sub-directory of where the above `founder-vcf` is located,
+    # e.g., a subdirectory called "hafpipe-snp-tables".
+    snp-table-dir: ""
+
+    # Extra settings for Task 1: Make SNP table from VCF.
+    # We internally already set --vcf, --chrom, --snptable, --logfile.
+    # This can be used for example for `--keephets`, `--subsetlist`, `--mincalls`
+    snp-table-extra: ""
+
+    # By default, we do not run Task 2 (Impute SNP table), and instead just use the SNP tables
+    # as provided by Task 1. However, if desired, imputation can be done in two ways:
+    #
+    #   - When provided with one of the two imputation methods offered by HAFpipe
+    #     ("simpute" or "npute") we run Task 2 with that method (unless this has already been done
+    #     in a previous run, when using `snp-table-dir` to avoid these recomputations).
+    #   - Alternatively, we also allow you to use your own imputation method. This can be based off
+    #     the tables obtained via Task 1, for example. The method can be named arbitrarily
+    #     (except for "simpute" or "npute"), and the imputed table files are then expected to be
+    #     named with a suffix according to that name - the same way that HAFpipe expects it.
+    #     Our tables from Task 1 are named `{chrom}.csv` for the chromosomes specified above.
+    #     Hence, we expect the imputed tables to be called `{chrom}.csv.my_method` for example.
+    #
+    # To generate these custom imputations, we offer two ways:
+    #
+    #   - Create manually. For this, you first can run grenepipe with the special target
+    #     `all_hafpipe_snp_tables`, that is, call grenepipe as usual with your cluster and conda
+    #     settings as needed, but at the end add `all_hafpipe_snp_tables` (without the back-ticks).
+    #     This will run only the steps necessary to create all SNP tables of Task 1 of HAFpipe,
+    #     e.g., file `1.csv` for the first chromosome, stored in the dir specified by `snp-table-dir`.
+    #     Then, you can run your imputation method on these files, storing the resulting imputed
+    #     tables in the same dir, and with the suffix according to the setting here, so for example
+    #     when setting `impmethod: "my_method"`, you need to create `1.csv.my_method`.
+    #     After that, run grenepipe again as usual (without the special target), and it will now
+    #     find your new `1.csv.my_method` files, and use them.
+    #   - Alternatively, you can set the `impute-script` below to a script that expects one of
+    #     the original SNP tables as its single argument (e.g., `.../my_script.sh /path/to/1.csv`
+    #     will be called), and outputs the respective imputed table (e.g., `/path/to/1.csv.my_method`),
+    #     using again the name specified here as a suffix for the file name.
+    impmethod: ""
+
+    # Specify a custom impute script to be used when the above `impmethod` is neither "simpute" nor
+    # "npute". The script is expected to take a single argument, the SNP table file for one chromosome,
+    # and produce the imputed table in the same directory of that file, but with a suffix as given
+    # by `impmethod` above. For example, when `impmethod: my_method`, we expect the script to take
+    # an input such as `1.csv`, and produce `1.csv.my_method`. See there for details on how to use
+    # this. The script can be any type of script that can be called from a shell, and the path to it
+    # should be specified here as an absolute path. See grenepipe/packages/hafpipe_impute_example.sh
+    # for an exemplary script.
+    impute-script: ""
+
+    # Conda environment yaml file for the above `impute-script`, if the tools needed in that script
+    # need it. Can be left empty if not needed to run that script.
+    impute-conda: ""
+
+    # Extra settings for Task 2: Impute SNP table, when using "simpute" or "npute" imputing.
+    # This is in particular useful for the `--nsites` option when using the "npute" method.
+    # Not used with custom impute methods when using `impute-script`.
+    impute-extra: ""
+
+    # Extra settings for Task 3: Infer haplotype frequencies.
+    # We internally already set --snptable, --bamfile, --refseq, --outdir, --logfile
+    # This can be used for example for `--encoding`, `--generations`, `--recombrate`, `--quantile`
+    haplotype-frequencies-extra: "--winsize 1000"
+
+    # Extra settings for Task 4: Calculate allele frequencies.
+    # We internally already set --snptable, --bamfile, --outdir, --logfile.
+    # It seems there are no extra arguments that could be provided for Task 4, but we offer it anyway.
+    allele-frequencies-extra: ""
+
+    # By default, we remove the frequency data of Tasks 3 and 4 after they have been used to create
+    # our final per-samples tables or the merged "all.csv" table, as they are redundant and hard
+    # to work with. However, if your workflow relies on the outputs as produced by HAFpipe,
+    # set this to true to keep those files.
+    # This affects the merged bam files per sample (which are kind of temporary anyway), as well as
+    # the `freqs` and `afSite` files of Tasks 3 and 4. The SNP tables of Tasks 1 and 2 are not
+    # affected by this; we always keep them, as they might need to be re-used for other runs as well.
+    keep-intermediates: false
+
+    # HAF-pipe by default produces individual files per sample and per chromosome, which can be a
+    # bit hard to work with, in particular as the only way to determine the chromosome is from
+    # the file name. So here we offer to concatenate the per-sample files for all chromsomes,
+    # making it easier to work with downstream. The files will be stored in `hafpipe/samples`.
+    # See also below for an option to compress these files to save disk space.
+    make-sample-tables: true
+
+    # Furthermore, we offer to merge all samples (and chromosomes) into one big table.
+    # Note that this can be quite huge, and take a while to create for large datasets.
+    # See again below for an option to compress this file to save disk space.
+    make-merged-table: false
+
+    # If set to true, the final "hafpipe/samples/*.csv" tables are compressed with gzip to save
+    # disk space. Only relevant if the above `make-sample-tables` is set to True.
+    compress-sample-tables: false
+
+    # If set to true, the final "hafpipe/all.csv" table is compressed with gzip to save disk space.
+    # Only relevant if the above `make-merged-table` is set to True.
+    compress-merged-table: false

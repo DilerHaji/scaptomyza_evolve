@@ -1,0 +1,44 @@
+# =================================================================================================
+#     Pool Variation Analysis Configuration
+# =================================================================================================
+
+# BAM directory from grenepipe output
+bam_dir: "mapping/dedup"
+
+# Reference genome (same as main analysis)
+reference: "PATH/TO/DATA/sfla_v2.fa"
+
+# Reference genome index (.fai)
+fai: "PATH/TO/DATA/sfla_v2.fa.fai"
+
+# Variant sites from main analysis (tab-separated: chrom\tpos)
+# This is the final_variants.txt produced by the v5_dedup_trim2 pipeline
+variant_sites: "PATH/TO/DATA/vfe9w_final_variants.txt"
+
+# Pileup parameters (same as main analysis)
+min_map_quality: 25
+min_base_quality: 25
+
+# Pool size in diploid individuals (each pool = 80 flies)
+pool_size_diploid: 80
+
+# All 18 per-pool sample names
+samples:
+  - B2G10p1
+  - B2G10p2
+  - B3G10p1
+  - B3G10p2
+  - B4G10p1
+  - B4G10p2
+  - M1G10p1
+  - M1G10p2
+  - T1G10p1
+  - T1G10p2
+  - T2G10p1
+  - T2G10p2
+  - T3G10p1
+  - T3G10p2
+  - F1G00
+  - F2G00
+  - F3G00
+  - F4G00

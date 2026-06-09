@@ -1,0 +1,19 @@
+#fvariants.txt
+############ CORRECTED COUNTS ############
+# fv_PRAv1: PRA: vPRA: Bergland2014
+fv_e10fe9w: e10: vfe9w: Bergland2014
+############ UNCORRECTED COUNTS ############
+fvOG_W: W: vW: 1.COV
+fvOG_Wfe9w: W_merged: vfe9w: 1.COV
+fvOG_E10fe9w: E10_merged: vfe9w: 1.COV
+fvOG_e10fe9w: e10: vfe9w: 1.COV
+# fvOG_G01fe9w: G01_merged: vfe9w: 1.COV
+# fvOG_G02fe9w: G02_merged: vfe9w: 1.COV
+# fvOG_G03fe9w: G03_merged: vfe9w: 1.COV
+# fvOG_G04fe9w: G04_merged: vfe9w: 1.COV
+# fvOG_G05fe9w: G05_merged: vfe9w: 1.COV
+# fvOG_G06fe9w: G06_merged: vfe9w: 1.COV
+# fvOG_G07fe9w: G07_merged: vfe9w: 1.COV
+# fvOG_G08fe9w: G08_merged: vfe9w: 1.COV
+# fvOG_G09fe9w: G09_merged: vfe9w: 1.COV
+# fvOG_G10fe9w: G10_merged: vfe9w: 1.COV

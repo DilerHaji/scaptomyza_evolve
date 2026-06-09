@@ -1,0 +1,12 @@
+name: plotting_founders
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy<2
+  - scipy
+  - matplotlib-base
+  - seaborn

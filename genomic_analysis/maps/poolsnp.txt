@@ -1,0 +1,21 @@
+# poolsnp.txt
+##### max-cov	min-cov		min-count	min-freq	miss-frac #####
+####################### Founder variants #######################
+f: pileup_f: 0.99,100,50,0.1,0: 0.01,0.99,100,4
+####################### G01-G09 variants -- all sequenced to similar coverage #######################
+e9: pileup_e9: 0.98,30,10,0.01,0: 0.01,0.99,50,12
+E10_merged: pileup_e10_merged: 0.98,30,10,0.01,0: 0.01,0.99,50,12
+e10: pileup_e10: 0.98,30,10,0.01,0: 0.01,0.99,50,12
+####################### wild #######################
+w: pileup_w: 0.98,20,5,0.05,0: 0.01,0.99,100,6
+W_merged: pileupW_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,2
+G01_merged: pileupG01_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G02_merged: pileupG02_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G03_merged: pileupG03_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G04_merged: pileupG04_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G05_merged: pileupG05_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G06_merged: pileupG06_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G07_merged: pileupG07_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G08_merged: pileupG08_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+# G09_merged: pileupG09_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3
+G10_merged: pileupG10_merged: 0.98,20,5,0.05,0: 0.01,0.99,100,3

@@ -1,0 +1,24 @@
+############ BvT ############
+# Corrected counts
+# glmBTf10: fv_BTMF23: B,T: F2023vf10v4: B
+# glmBTf10v2: fv_BTMF23v2: B,T: F2023vf10v4: B
+# glmBTf10v3: fv_BTMF23v3: B,T: F2023vf10v5: B
+# glmBTf10v4: fv_BTMF23v4: B,T: F2023vf10v5: B
+# glmV1: fv_BTMFv1: B,T: BTMFv1: B
+glmV1full: fv_e10fe9w: B,T,M,F: vfe9w: B
+# glmW: fv_PRAv1: B,T : vPRA: NA
+##### Raw counts, BvT
+# glmBTf10og: fvOG_BTMF23: B,T: F2023vf10v4: B
+# glmBTf10ogv2: fvOG_BTMF23v2: B,T: F2023vf10v4: B
+# glmBTf10ogv3: fvOG_BTMF23v3: B,T: F2023vf10v5: B
+# glmBTf10ogv4: fvOG_BTMF23v4: B,T: F2023vf10v5: B
+# glmV1og: fvOG_BTMFv1: B,T: BTMFv1: B
+############ MvT ############
+# glmMTf10v1: fv_BTMF23f10v1: M,T: F2023vf10v1: B
+# MvT & MvB
+# glmBTMf10v1: fv_BTMF23f10v1: B,T,M: F2023vf10v1: M
+############ OLD ############
+# glmBTf10v3_OG: fvOG_BTMF23f10v3: B,T: F2023vf10v3: B
+# glmBTf10v1: fv_BTMF23f10v1: B,T: F2023vf10v1: B
+# glmBTf10v2: fv_BTMF23f10v2: B,T: F2023vf10v2: B
+# glmBTf10v3: fv_BTMF23f10v3: B,T: F2023vf10v3: B

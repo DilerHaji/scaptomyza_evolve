@@ -1,0 +1,103 @@
+##############################################################################
+# ngsLD pipeline configuration
+#
+# Two cohorts of individually-sequenced S. flava:
+#   - founders (128 flies, ~0.5× each)
+#   - T2G07 (64 flies, ~0.5× each)
+#
+# Pipeline:
+#   1. Build per-cohort bamlists
+#   2. ANGSD per cohort: call SNPs + emit beagle GL (-doGlf 2)
+#   3. ngsLD per scaffold per cohort
+#   4. fit_LDdecay.R: genome-wide decay curves
+#   5. LD heatmaps at candidate haplovalidate-block hotspots
+#   6. Summarize r² within vs outside haplovalidate blocks
+##############################################################################
+
+# Inputs — run pipeline FROM PATH/TO/DATA/IND/
+bam_dir: "mapping/final"
+reference: "PATH/TO/DATA/sfla_v2.fa"
+samples_tsv: "samples.tsv"
+
+# Reuse existing bamlists (already built for the individual-seq pipeline)
+founders_bamlist: "angsd/founders_only.bamlist"
+t2g07_bamlist: "angsd/individuals.bamlist"
+
+# Scaffolds (same as haplovalidate)
+scaffolds:
+  - "chr_ScDA7r2_110_HRSCAF_295"
+  - "chr_ScDA7r2_126_HRSCAF_325"
+  - "chr_ScDA7r2_439_HRSCAF_779"
+  - "chr_ScDA7r2_597_HRSCAF_953"
+
+# Cohort definitions
+cohorts:
+  founders:
+    # Samples with prefix NOT starting with T2G07 (128 individuals)
+    n_ind: 128
+    prefix_excludes: ["T2G07_"]
+  T2G07:
+    # Samples with prefix T2G07 (64 individuals)
+    n_ind: 64
+    prefix_includes: ["T2G07_"]
+
+# ANGSD parameters (matched to existing founders run)
+angsd:
+  GL: 1               # SAMtools genotype likelihood model
+  doGlf: 2            # beagle text format (for ngsLD --probs)
+  doMajorMinor: 1
+  doMaf: 1
+  SNP_pval: "1e-6"
+  minMapQ: 20         # matched to existing founders run
+  minQ: 20
+  minInd_frac: 0.5    # 50% → 64 founders / 32 T2G07
+  minMaf: 0.01        # matched to existing run
+
+# ngsLD parameters
+ngsld:
+  max_kb_dist: 100    # Only pairs within 100 kb
+  min_maf: 0.05       # Post-ANGSD filter
+  rnd_sample_decay: 0.05   # Subsample for decay fitting (speed)
+  n_threads: 4
+
+# fit_LDdecay.R parameters
+fit_decay:
+  fit_boot: 100       # Bootstrap iterations for CI
+  fit_bin_size: 250   # bp bin
+  plot_x_lim: 100000  # 100 kb max
+
+# Candidate regions for LD heatmaps (from haplovalidate block analysis)
+heatmap_regions:
+  - name: "scaffold_439_hotspot"
+    chr: "chr_ScDA7r2_439_HRSCAF_779"
+    start: 2000000
+    end: 12000000
+    description: "Symmetric-selection hotspot, highest PBS symmetry scores"
+  - name: "scaffold_110_leftedge"
+    chr: "chr_ScDA7r2_110_HRSCAF_295"
+    start: 0
+    end: 5000000
+    description: "noThreshold blocks overlap with wild host-differentiation peak"
+  - name: "scaffold_597_leftend"
+    chr: "chr_ScDA7r2_597_HRSCAF_953"
+    start: 0
+    end: 5000000
+    description: "B-enriched fragment signals in haplovalidate"
+  - name: "scaffold_126_control"
+    chr: "chr_ScDA7r2_126_HRSCAF_325"
+    start: 10000000
+    end: 15000000
+    description: "Low PBS signal — neutral control region"
+
+##############################################################################
+# Conda env
+##############################################################################
+conda_env: "environments/ngsld.yaml"
+ngsld_source: "ngsLD-master"  # local copy (compiled on cluster)
+
+##############################################################################
+# Cluster resources
+##############################################################################
+cluster:
+  account: "${SLURM_ACCOUNT}"
+  partition: "savio4_htc"

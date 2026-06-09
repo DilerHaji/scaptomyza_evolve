@@ -1,0 +1,49 @@
+reference_genome: "PATH/TO/DATA/sfla_v2.fa"
+
+input:
+  samples_tsv:        "samples.tsv"
+  founders_bamlist:   "angsd/founders_only.bamlist"      # 128 founder BAMs
+  founders_beagle:    "angsd/founders_only.beagle.gz"    # existing (from Snakefile_founders_analyses)
+  all_bamlist:        "angsd/individuals.bamlist"        # 192 total (founders + T2G07)
+
+pcangsd:
+  k_range:     [2, 3, 4, 5, 6, 7, 8]    # K values for admixture sweep
+  n_pcs:       10                        # -e flag
+  iter:        500                       # -i flag (increase from default 100 to help convergence)
+  threads:     16
+  minmaf:      0.05
+
+
+tube_metadata:
+  B1B7E2:    { host_plant: B,     pool_type: single_host }
+  B2B8E1:    { host_plant: B,     pool_type: single_host }
+  B2B8E2:    { host_plant: B,     pool_type: single_host }
+  B2B8E3:    { host_plant: B,     pool_type: single_host }
+  B3B4E1:    { host_plant: B,     pool_type: single_host }
+  B3B4E2:    { host_plant: B,     pool_type: single_host }
+  B3B4E3:    { host_plant: B,     pool_type: single_host }
+  B4B4E2:    { host_plant: B,     pool_type: single_host }
+  B5B6E1:    { host_plant: B,     pool_type: single_host }
+  B5B6E2:    { host_plant: B,     pool_type: single_host }
+  B5B6E3:    { host_plant: B,     pool_type: single_host }
+  T1T2E1:    { host_plant: T,     pool_type: single_host }
+  T1T2E2:    { host_plant: T,     pool_type: single_host }
+  T1T2E3:    { host_plant: T,     pool_type: single_host }
+  T1T2E3m:   { host_plant: T,     pool_type: single_host }
+  T3T4E1:    { host_plant: T,     pool_type: single_host }
+  T3T4E2:    { host_plant: T,     pool_type: single_host }
+  T5T6E1:    { host_plant: T,     pool_type: single_host }
+  T5T6E2:    { host_plant: T,     pool_type: single_host }
+  T5T6E3:    { host_plant: T,     pool_type: single_host }
+  T7T8E1:    { host_plant: T,     pool_type: single_host }
+  T7T8E2:    { host_plant: T,     pool_type: single_host }
+  NH2P:      { host_plant: both,  pool_type: mixed }
+  NH2p:      { host_plant: both,  pool_type: mixed }       # same as NH2P
+  M9E1:      { host_plant: both,  pool_type: mixed }
+  M9E2:      { host_plant: both,  pool_type: mixed }
+  MXE2:      { host_plant: both,  pool_type: mixed }
+  E1all:     { host_plant: both,  pool_type: all_combined }
+  FANH:      { host_plant: both,  pool_type: all_combined }
+  FPmix:     { host_plant: both,  pool_type: all_combined }
+  FPmixE2:   { host_plant: both,  pool_type: all_combined }
+  T2G07:     { host_plant: T,     pool_type: exp_evolution }

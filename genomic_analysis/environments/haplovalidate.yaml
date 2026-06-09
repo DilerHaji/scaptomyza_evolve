@@ -1,0 +1,17 @@
+name: haplovalidate
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - r-base>=4.0
+  - r-data.table
+  - r-psych
+  - r-stringr
+  - r-rcolorbrewer
+  - r-rcpp
+  - r-igraph
+  - r-foreach
+  - r-zoo
+  - r-matrixstats
+  - r-gplots
+  - r-dbscan

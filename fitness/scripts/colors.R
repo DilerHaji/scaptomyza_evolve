@@ -1,0 +1,5 @@
+custom_colors <- c("T" = "#EDB72D", "B" = "#499FFF", "M" = "#B01754")
+custom_colors2 <- c("Turritus" = "#EDB72D", "Barbarea" = "#499FFF", "Mixture" = "#B01754")
+custom_colors3 <- c("Tested on Turritus" = "#EDB72D", "Tested on Barbarea" = "#499FFF", "Tested on Mixture" = "#B01754")
+custom_labels <- c("B" = "Barbarea", "M" = "Mixture", "T" = "Turritus")
+custom_labels_panels <- c("B" = "Fitness Tested \non Barbarea", "M" = "Fitness Tested \non Mixture", "T" = "Fitness Tested \non Turritus")

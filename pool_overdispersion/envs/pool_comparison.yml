@@ -1,0 +1,13 @@
+name: pool_comparison
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.10
+  - polars>=0.20
+  - pandas>=2.0
+  - numpy>=1.24
+  - matplotlib>=3.7
+  - seaborn>=0.12
+  - scipy>=1.10
+  - pysam>=0.21

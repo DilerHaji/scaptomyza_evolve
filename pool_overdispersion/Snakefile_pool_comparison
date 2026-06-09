@@ -1,0 +1,199 @@
+# =================================================================================================
+#     Pool Variation Analysis
+#
+#     Takes per-pool BAMs from grenepipe and compares allele frequencies between
+#     pools from the same biological sample at known variant sites from the main
+#     analysis pipeline.
+#
+#     Usage:
+#       snakemake -s Snakefile_pool_comparison --configfile config_pool_comparison.yml \
+#           --profile profiles/slurm -j 100
+# =================================================================================================
+
+configfile: "config_pool_comparison.yml"
+
+import os
+import re
+
+# ---------------------------------------------------------------------------
+#  Parse pool groups: { "B2G10": ["B2G10p1","B2G10p2"], "F_founders": ["F1G00",...], ... }
+# ---------------------------------------------------------------------------
+SAMPLES = config["samples"]  # list of all 18 sample names
+
+POOL_GROUPS = {}
+for s in SAMPLES:
+    m = re.match(r"^([BTMF]\d+G\d+)p\d+$", s)
+    if m:
+        group = m.group(1)
+        POOL_GROUPS.setdefault(group, []).append(s)
+    elif re.match(r"^F\dG00$", s):
+        POOL_GROUPS.setdefault("founders", []).append(s)
+
+# Flatten pairwise comparisons for multi-pool groups (excluding founders which are 4-way)
+PAIR_GROUPS = {k: v for k, v in POOL_GROUPS.items() if k != "founders" and len(v) == 2}
+
+CHROMOSOMES = []
+with open(config["fai"]) as f:
+    for line in f:
+        chrom = line.strip().split("\t")[0]
+        CHROMOSOMES.append(chrom)
+
+
+# ---------------------------------------------------------------------------
+#  Targets
+# ---------------------------------------------------------------------------
+rule all:
+    input:
+        "results/pool_af_table.tsv.gz",
+        "results/overdispersion_summary.tsv",
+        "results/pool_variation_figures.done",
+
+localrules: all
+
+
+# ---------------------------------------------------------------------------
+#  Rule 0: Index BAMs on demand (grenepipe dedup step did not emit .bai)
+# ---------------------------------------------------------------------------
+rule samtools_index:
+    input:
+        config["bam_dir"] + "/{sample}.bam",
+    output:
+        config["bam_dir"] + "/{sample}.bam.bai",
+    conda:
+        "envs/samtools.yaml"
+    resources:
+        mem_mb=4000,
+        time="00:30:00",
+    shell:
+        "samtools index -@ 2 {input}"
+
+
+# ---------------------------------------------------------------------------
+#  Rule 1: Generate pileup per sample at known variant sites
+# ---------------------------------------------------------------------------
+rule pileup_at_sites:
+    input:
+        bam=config["bam_dir"] + "/{sample}.bam",
+        bai=config["bam_dir"] + "/{sample}.bam.bai",
+        ref=config["reference"],
+        sites=config["variant_sites"],
+    output:
+        mpileup="pileup/{sample}/{chrom}.mpileup",
+    params:
+        min_mq=config.get("min_map_quality", 25),
+        min_bq=config.get("min_base_quality", 25),
+    conda:
+        "envs/samtools.yaml"
+    resources:
+        mem_mb=4000,
+        time="00:30:00",
+    shell:
+        """
+        samtools mpileup \
+            -f {input.ref} \
+            -r {wildcards.chrom} \
+            -l {input.sites} \
+            -q {params.min_mq} \
+            -Q {params.min_bq} \
+            -B --ignore-RG \
+            {input.bam} \
+            > {output.mpileup}
+        """
+
+
+# ---------------------------------------------------------------------------
+#  Rule 2: Extract allele frequencies from pileup
+# ---------------------------------------------------------------------------
+rule extract_af:
+    input:
+        mpileup="pileup/{sample}/{chrom}.mpileup",
+    output:
+        af="af/{sample}/{chrom}.tsv",
+    conda:
+        "envs/pool_comparison.yml"
+    resources:
+        mem_mb=4000,
+        time="00:30:00",
+    script:
+        "scripts/extract_af_from_pileup.py"
+
+
+# ---------------------------------------------------------------------------
+#  Rule 3: Gather per-chrom AF files into one table per sample
+# ---------------------------------------------------------------------------
+rule gather_af:
+    input:
+        expand("af/{{sample}}/{chrom}.tsv", chrom=CHROMOSOMES),
+    output:
+        "af_gathered/{sample}.tsv.gz",
+    resources:
+        mem_mb=4000,
+        time="00:15:00",
+    shell:
+        """
+        (head -1 {input[0]} && tail -n +2 -q {input}) | gzip > {output}
+        """
+
+
+# ---------------------------------------------------------------------------
+#  Rule 4: Merge all sample AF tables into one wide table
+# ---------------------------------------------------------------------------
+rule merge_af_tables:
+    input:
+        expand("af_gathered/{sample}.tsv.gz", sample=SAMPLES),
+    output:
+        "results/pool_af_table.tsv.gz",
+    params:
+        samples=SAMPLES,
+    conda:
+        "envs/pool_comparison.yml"
+    resources:
+        mem_mb=16000,
+        time="01:00:00",
+    script:
+        "scripts/merge_pool_af.py"
+
+
+# ---------------------------------------------------------------------------
+#  Rule 5: Compute overdispersion and inter-pool AF comparison
+# ---------------------------------------------------------------------------
+rule compute_overdispersion:
+    input:
+        af_table="results/pool_af_table.tsv.gz",
+    output:
+        summary="results/overdispersion_summary.tsv",
+        per_site="results/overdispersion_per_site.tsv.gz",
+    params:
+        pool_groups=POOL_GROUPS,
+        pair_groups=PAIR_GROUPS,
+        pool_size=config.get("pool_size_diploid", 80),
+    conda:
+        "envs/pool_comparison.yml"
+    resources:
+        mem_mb=32000,
+        time="02:00:00",
+    script:
+        "scripts/compute_overdispersion.py"
+
+
+# ---------------------------------------------------------------------------
+#  Rule 6: Generate diagnostic figures
+# ---------------------------------------------------------------------------
+rule plot_pool_variation:
+    input:
+        summary="results/overdispersion_summary.tsv",
+        per_site="results/overdispersion_per_site.tsv.gz",
+        af_table="results/pool_af_table.tsv.gz",
+    output:
+        done=touch("results/pool_variation_figures.done"),
+    params:
+        pool_groups=POOL_GROUPS,
+        pair_groups=PAIR_GROUPS,
+        outdir="results/figures",
+    conda:
+        "envs/pool_comparison.yml"
+    resources:
+        mem_mb=16000,
+        time="01:00:00",
+    script:
+        "scripts/plot_pool_variation.py"

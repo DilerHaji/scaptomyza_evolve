@@ -1,0 +1,240 @@
+import os
+
+configfile: "config/ngsld_config.yaml"
+
+NGSLD_SRC = config.get("ngsld_source", "ngsLD-master")
+NGSLD_BIN = f"{NGSLD_SRC}/ngsLD"
+FIT_DECAY_R = f"{NGSLD_SRC}/scripts/fit_LDdecay.R"
+LD_BLOCKS_SH = f"{NGSLD_SRC}/scripts/LD_blocks.sh"
+NGSLD_CONDA = config.get("conda_env", "environments/ngsld.yaml")
+
+COHORTS = list(config["cohorts"].keys())
+SCAFFOLDS = config["scaffolds"]
+HEATMAP_REGIONS = [r["name"] for r in config["heatmap_regions"]]
+
+
+def region_spec(region_name):
+    for r in config["heatmap_regions"]:
+        if r["name"] == region_name:
+            return r
+    raise ValueError(f"Unknown region: {region_name}")
+
+
+rule all:
+    input:
+        expand("ngsld/decay/{cohort}_decay.pdf", cohort=COHORTS),
+        expand("ngsld/decay/{cohort}_decay_fit.tsv", cohort=COHORTS),
+        expand("ngsld/heatmaps/{region}_{cohort}.r2.pdf",
+               region=HEATMAP_REGIONS, cohort=COHORTS),
+        "ngsld/block_validation/block_LD_summary.tsv",
+
+def cohort_bamlist(wc):
+    return config["founders_bamlist"] if wc.cohort == "founders" else config["t2g07_bamlist"]
+
+
+rule angsd_cohort:
+    input:
+        bamlist=cohort_bamlist,
+        ref=config["reference"],
+    output:
+        beagle="ngsld/angsd/{cohort}/{scaffold}.beagle.gz",
+        mafs="ngsld/angsd/{cohort}/{scaffold}.mafs.gz",
+    conda:
+        NGSLD_CONDA
+    params:
+        gl=config["angsd"]["GL"],
+        doGlf=config["angsd"]["doGlf"],
+        doMajorMinor=config["angsd"]["doMajorMinor"],
+        doMaf=config["angsd"]["doMaf"],
+        snp_pval=config["angsd"]["SNP_pval"],
+        minMapQ=config["angsd"]["minMapQ"],
+        minQ=config["angsd"]["minQ"],
+        minMaf=config["angsd"]["minMaf"],
+        min_ind_frac=config["angsd"]["minInd_frac"],
+        n_ind=lambda wc: config["cohorts"][wc.cohort]["n_ind"],
+        prefix="ngsld/angsd/{cohort}/{scaffold}",
+    log:
+        "logs/ngsld/angsd_{cohort}_{scaffold}.log"
+    resources:
+        mem_mb=32000,
+        runtime=240,
+    threads: 4
+    shell:
+        """
+        mkdir -p ngsld/angsd/{wildcards.cohort}
+        MIN_IND=$(python3 -c "print(int({params.n_ind} * {params.min_ind_frac}))")
+        angsd \\
+            -bam {input.bamlist} \\
+            -ref {input.ref} \\
+            -out {params.prefix} \\
+            -r {wildcards.scaffold}: \\
+            -GL {params.gl} \\
+            -doGlf {params.doGlf} \\
+            -doMajorMinor {params.doMajorMinor} \\
+            -doMaf {params.doMaf} \\
+            -SNP_pval {params.snp_pval} \\
+            -minMapQ {params.minMapQ} \\
+            -minQ {params.minQ} \\
+            -minMaf {params.minMaf} \\
+            -minInd $MIN_IND \\
+            -nThreads {threads} \\
+            > {log} 2>&1
+        """
+
+
+rule angsd_to_positions:
+    input:
+        mafs="ngsld/angsd/{cohort}/{scaffold}.mafs.gz",
+    output:
+        pos="ngsld/angsd/{cohort}/{scaffold}.pos",
+    shell:
+        """
+        zcat {input.mafs} \\
+          | awk 'NR>1 {{print $1"\\t"$2}}' \\
+          > {output.pos}
+        """
+
+
+rule ngsld_run:
+    input:
+        beagle="ngsld/angsd/{cohort}/{scaffold}.beagle.gz",
+        pos="ngsld/angsd/{cohort}/{scaffold}.pos",
+    output:
+        ld="ngsld/ld/{cohort}/{scaffold}.ld.gz",
+    conda:
+        NGSLD_CONDA
+    params:
+        ngsld_bin=NGSLD_BIN,
+        n_ind=lambda wc: config["cohorts"][wc.cohort]["n_ind"],
+        max_kb=config["ngsld"]["max_kb_dist"],
+        min_maf=config["ngsld"]["min_maf"],
+        tmp_ld="ngsld/ld/{cohort}/{scaffold}.ld",
+    log:
+        "logs/ngsld/ngsld_{cohort}_{scaffold}.log"
+    resources:
+        mem_mb=32000,
+        runtime=480,
+    threads: 4
+    shell:
+        """
+        mkdir -p ngsld/ld/{wildcards.cohort}
+        N_SITES=$(wc -l < {input.pos})
+        echo "Running ngsLD: cohort={wildcards.cohort}, scaffold={wildcards.scaffold}, n_sites=$N_SITES, n_ind={params.n_ind}" > {log}
+
+        # ngsLD was compiled against the conda env's libgsl.so.28 
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${{LD_LIBRARY_PATH:-}}"
+
+        {params.ngsld_bin} \\
+            --geno {input.beagle} \\
+            --probs --log_scale \\
+            --n_ind {params.n_ind} \\
+            --n_sites $N_SITES \\
+            --pos {input.pos} \\
+            --max_kb_dist {params.max_kb} \\
+            --min_maf {params.min_maf} \\
+            --n_threads {threads} \\
+            --out {params.tmp_ld} \\
+            >> {log} 2>&1
+
+        gzip -f {params.tmp_ld}
+        """
+
+rule fit_ld_decay:
+    input:
+        ld_files=expand("ngsld/ld/{{cohort}}/{scaffold}.ld.gz", scaffold=SCAFFOLDS),
+        fit_r=FIT_DECAY_R,
+    output:
+        decay_pdf="ngsld/decay/{cohort}_decay.pdf",
+        decay_fit="ngsld/decay/{cohort}_decay_fit.tsv",
+        file_list="ngsld/decay/{cohort}_ld_files.txt",
+    conda:
+        NGSLD_CONDA
+    params:
+        n_ind=lambda wc: config["cohorts"][wc.cohort]["n_ind"],
+        fit_boot=config["fit_decay"]["fit_boot"],
+        fit_bin_size=config["fit_decay"]["fit_bin_size"],
+        plot_x_lim=config["fit_decay"]["plot_x_lim"],
+        rnd_sample=config["ngsld"]["rnd_sample_decay"],
+    log:
+        "logs/ngsld/fit_decay_{cohort}.log"
+    resources:
+        mem_mb=16000,
+        runtime=120,
+    shell:
+        """
+        rm -f {output.file_list}
+        for f in {input.ld_files}; do
+            scaf=$(basename $f .ld.gz)
+            echo -e "$f\\t$scaf" >> {output.file_list}
+        done
+
+        Rscript --vanilla --slave {input.fit_r} \\
+            --header \\
+            --ld_files {output.file_list} \\
+            --n_ind {params.n_ind} \\
+            --fit_boot {params.fit_boot} \\
+            --fit_bin_size {params.fit_bin_size} \\
+            --plot_x_lim {params.plot_x_lim} \\
+            --plot_group col_1 \\
+            --rnd_sample {params.rnd_sample} \\
+            --out {output.decay_pdf} \\
+            > {log} 2>&1
+
+        grep -E "DecayRate|LDmax|LDmin" {log} | tee {output.decay_fit} || true
+        touch {output.decay_fit}
+        """
+
+def region_scaffold(wc):
+    r = region_spec(wc.region)
+    return f"ngsld/ld/{wc.cohort}/{r['chr']}.ld.gz"
+
+
+rule ld_heatmap:
+    input:
+        ld=region_scaffold,
+        blocks_sh=LD_BLOCKS_SH,
+    output:
+        r2="ngsld/heatmaps/{region}_{cohort}.r2.pdf",
+        dp="ngsld/heatmaps/{region}_{cohort}.Dp.pdf",
+    conda:
+        NGSLD_CONDA
+    params:
+        chrom=lambda wc: region_spec(wc.region)["chr"],
+        start=lambda wc: region_spec(wc.region)["start"],
+        end=lambda wc: region_spec(wc.region)["end"],
+    log:
+        "logs/ngsld/heatmap_{region}_{cohort}.log"
+    resources:
+        mem_mb=16000,
+        runtime=60,
+    shell:
+        """
+        mkdir -p ngsld/heatmaps
+        cd ngsld/heatmaps
+        zcat ../../{input.ld} \\
+          | bash ../../{input.blocks_sh} {params.chrom} {params.start} {params.end} \\
+          > ../../{log} 2>&1
+
+        if [ -f LD_blocks.r2.pdf ]; then mv LD_blocks.r2.pdf {wildcards.region}_{wildcards.cohort}.r2.pdf; fi
+        if [ -f LD_blocks.Dp.pdf ]; then mv LD_blocks.Dp.pdf {wildcards.region}_{wildcards.cohort}.Dp.pdf; fi
+        """
+
+
+rule block_validation:
+    input:
+        ld_founders=expand("ngsld/ld/founders/{scaffold}.ld.gz", scaffold=SCAFFOLDS),
+        ld_t2g07=expand("ngsld/ld/T2G07/{scaffold}.ld.gz", scaffold=SCAFFOLDS),
+    output:
+        summary="ngsld/block_validation/block_LD_summary.tsv",
+    conda:
+        NGSLD_CONDA
+    log:
+        "logs/ngsld/block_validation.log"
+    resources:
+        mem_mb=16000,
+        runtime=60,
+    shell:
+        """
+        mkdir -p ngsld/block_validation
+        Rscript scripts/ngsld_block_validation.R > {log} 2>&1
+        """

@@ -1,0 +1,128 @@
+import os
+
+configfile: "config/hv_config.yaml"
+
+HV_CONDA_ENV = config.get("conda_env", "environments/haplovalidate.yaml")
+
+TREATMENTS = list(config["treatments"].keys())
+PARAMSETS = list(config["paramsets"].keys())
+SCAFFOLDS = config["scaffolds"]
+SCAFFOLD_STR = ",".join(SCAFFOLDS)
+
+def get_n_repl(treatment):
+    return config["treatments"][treatment]["n_repl"]
+
+def build_acer_samples(treatment):
+    gens = config["generations"]
+    evolved_gens = [g for g in gens if g != 0]
+    trt_type = config["treatments"][treatment]["type"]
+
+    if trt_type == "single":
+        trt_letters = [treatment]
+    elif trt_type == "pairwise":
+        trt_letters = [treatment[0], treatment[1]]
+    else:
+        raise ValueError(f"Unknown treatment type: {trt_type}")
+
+    n_repl_per_trt = 4
+    samples = []
+    for trt in trt_letters:
+        for r in range(1, n_repl_per_trt + 1):
+            samples.append(f"F{r}G00")
+            for g in evolved_gens:
+                samples.append(f"{trt}{r}G{g:02d}")
+
+    return ",".join(samples)
+
+rule all:
+    input:
+        expand("hv_results/{treatment}/{paramset}/dominant_blocks.tsv",
+               treatment=TREATMENTS, paramset=PARAMSETS),
+        "hv_results/comparison_summary.tsv"
+
+rule build_sync:
+    input:
+        ad=config["merged_ad"],
+        samples=config["sample_list"],
+    output:
+        sync="hv_sync/{treatment}.sync"
+    params:
+        scaffold=SCAFFOLD_STR,
+    log:
+        "logs/hv/build_sync_{treatment}.log"
+    resources:
+        mem_mb=4000,
+        time="01:00:00",
+    shell:
+        """
+        python3 scripts/build_hv_sync.py \
+            --treatment {wildcards.treatment} \
+            --scaffold {params.scaffold} \
+            --ad {input.ad} \
+            --sample_list {input.samples} \
+            --out {output.sync} 2> {log}
+        """
+
+rule run_haplovalidate:
+    input:
+        sync="hv_sync/{treatment}.sync",
+        ad=config["merged_ad"],
+        depth=config["merged_depth"],
+        samples=config["sample_list"],
+    output:
+        blocks="hv_results/{treatment}/{paramset}/dominant_blocks.tsv",
+        scores="hv_results/{treatment}/{paramset}/acer_scores.tsv",
+        result="hv_results/{treatment}/{paramset}/haplovalidate_result.rds",
+        summary="hv_results/{treatment}/{paramset}/summary.txt",
+    conda:
+        HV_CONDA_ENV
+    params:
+        ne=lambda wc: config["paramsets"][wc.paramset]["Ne"],
+        poolsize=lambda wc: config["paramsets"][wc.paramset]["poolSize"],
+        maf_min=lambda wc: config["paramsets"][wc.paramset]["maf_min"],
+        min_depth=lambda wc: config["paramsets"][wc.paramset]["min_depth"],
+        max_cands=lambda wc: config["paramsets"][wc.paramset]["max_cands_per_scaffold"],
+        mncs=lambda wc: config["paramsets"][wc.paramset]["mncs"],
+        takerandom=lambda wc: config["paramsets"][wc.paramset]["takerandom"],
+        filterrange=lambda wc: config["paramsets"][wc.paramset]["filterrange"],
+        score_threshold=lambda wc: config["paramsets"][wc.paramset]["score_threshold"],
+        use_bh=lambda wc: "--use_bh" if config["paramsets"][wc.paramset].get("use_bh", False) else "",
+        n_repl=lambda wc: get_n_repl(wc.treatment),
+        acer_samples=lambda wc: build_acer_samples(wc.treatment),
+        scaffolds=SCAFFOLD_STR,
+    log:
+        "logs/hv/run_{treatment}_{paramset}.log"
+    resources:
+        mem_mb=32000,
+        time="04:00:00",
+    shell:
+        "bash scripts/run_hv_wrapper.sh --sync {input.sync} --ad {input.ad} --depth {input.depth} --sample_list {input.samples} --treatment {wildcards.treatment} --ne {params.ne} --poolsize {params.poolsize} --n_repl {params.n_repl} --outdir hv_results/{wildcards.treatment}/{wildcards.paramset} --scaffolds {params.scaffolds} --max_cands_per_scaffold {params.max_cands} --maf_min {params.maf_min} --min_depth {params.min_depth} --mncs {params.mncs} --takerandom {params.takerandom} --filterrange {params.filterrange} --score_threshold {params.score_threshold} {params.use_bh} --acer_samples {params.acer_samples} > {log} 2>&1"
+
+rule collect_results:
+    input:
+        summaries=expand("hv_results/{treatment}/{paramset}/summary.txt",
+                         treatment=TREATMENTS, paramset=PARAMSETS),
+    output:
+        table="hv_results/comparison_summary.tsv",
+    run:
+        rows = []
+        for f in input.summaries:
+            parts = f.split("/")
+            treatment = parts[1]
+            paramset = parts[2]
+
+            data = {"treatment": treatment, "paramset": paramset}
+            with open(f) as fh:
+                for line in fh:
+                    line = line.strip()
+                    if ":" in line:
+                        key, val = line.split(":", 1)
+                        data[key.strip()] = val.strip()
+            rows.append(data)
+
+        if rows:
+            keys = list(rows[0].keys())
+            with open(output.table, "w") as out:
+                out.write("\t".join(keys) + "\n")
+                for row in rows:
+                    out.write("\t".join(str(row.get(k, "")) for k in keys) + "\n")

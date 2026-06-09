@@ -1,0 +1,246 @@
+configfile: "config.yaml"
+
+import os
+
+REF              = config["data"]["reference-genome"]
+FOUNDERS_BAMLIST = "angsd/founders_only.bamlist"    # 128 founder BAMs only
+BAMLIST_ALL      = "angsd/individuals.bamlist"      # all 192 (founders + T2G07)
+
+
+FOUNDERS_BEAGLE  = "angsd/founders_only.beagle.gz"
+FOUNDERS_MAFS    = "angsd/founders_only.mafs.gz"
+
+
+POOL_VCF     = config.get(
+    "pool_vcf",
+    "PATH/TO/DATA/"
+    "fvariants/fvOG_e10fe9w.fixed_no_neff.vcf.gz"
+)
+POOL_SAMPLES = ["F1G00", "F2G00", "F3G00", "F4G00"]
+
+
+
+
+rule all_founders_analyses:
+    input:
+        "pcangsd/founders_pca_admix.png",
+        "af_comparison/af_comparison_figure.png",
+        "af_comparison/af_comparison_stats.tsv",
+
+
+
+
+rule angsd_founders_beagle:
+    input:
+        bamlist = FOUNDERS_BAMLIST,
+        ref     = REF,
+    output:
+        beagle = FOUNDERS_BEAGLE,
+        mafs   = FOUNDERS_MAFS,
+    params:
+        out_prefix = "angsd/founders_only",
+        threads    = 16,
+        min_ind    = 64,     # require at least half of 128 founders
+    log:
+        "logs/founders_analyses/angsd_founders_beagle.log",
+    threads: 16
+    conda:
+        "envs/angsd.yaml"
+    shell:
+        r"""
+        mkdir -p angsd logs/founders_analyses
+
+        angsd \
+            -b {input.bamlist} \
+            -ref {input.ref} \
+            -GL 1 \
+            -doGlf 2 \
+            -doMajorMinor 1 \
+            -doMaf 1 \
+            -SNP_pval 1e-6 \
+            -minMapQ 20 \
+            -minQ 20 \
+            -minInd {params.min_ind} \
+            -minMaf 0.01 \
+            -nThreads {params.threads} \
+            -out {params.out_prefix} \
+            > {log} 2>&1
+        """
+
+
+
+rule pcangsd:
+    input:
+        beagle = FOUNDERS_BEAGLE,
+    output:
+        cov    = "pcangsd/founders.cov",
+        admix  = "pcangsd/founders.admix.2.Q",
+    params:
+        out_prefix = "pcangsd/founders",
+        n_pcs      = 10,
+        admix_K    = 2,
+        threads    = 16,
+    log:
+        "logs/founders_analyses/pcangsd.log",
+    threads: 16
+    conda:
+        "envs/pcangsd.yaml"
+    shell:
+        r"""
+        mkdir -p pcangsd logs/founders_analyses
+
+        pcangsd \
+            -b {input.beagle} \
+            -e {params.n_pcs} \
+            -o {params.out_prefix} \
+            --admix \
+            --admix-K {params.admix_K} \
+            -t {params.threads} \
+            > {log} 2>&1
+        """
+
+
+
+
+rule plot_pcangsd:
+    input:
+        cov     = "pcangsd/founders.cov",
+        admix   = "pcangsd/founders.admix.2.Q",
+        mafs    = FOUNDERS_MAFS,
+        bamlist = FOUNDERS_BAMLIST,
+    output:
+        fig = "pcangsd/founders_pca_admix.png",
+    params:
+        script = "scripts/plot_pcangsd.py",
+        n_pcs  = 10,
+    log:
+        "logs/founders_analyses/plot_pcangsd.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        python {params.script} \
+            --cov     {input.cov} \
+            --admix   {input.admix} \
+            --bamlist {input.bamlist} \
+            --n-pcs   {params.n_pcs} \
+            --output  {output.fig} \
+            > {log} 2>&1
+        """
+
+
+
+
+rule pool_positions_bed:
+    input:
+        vcf = POOL_VCF,
+    output:
+        bed = "af_comparison/pool_positions.bed",
+    log:
+        "logs/founders_analyses/pool_positions_bed.log",
+    conda:
+        "envs/bcftools.yaml"
+    shell:
+        r"""
+        mkdir -p af_comparison
+
+        bcftools view -H {input.vcf} \
+            | awk '{{print $1"\t"($2-1)"\t"$2}}' \
+            > {output.bed} 2> {log}
+
+        echo "Positions: $(wc -l < {output.bed})" >> {log}
+        """
+
+
+
+
+rule ind_pseudopool_freq:
+    input:
+        bamlist = FOUNDERS_BAMLIST,
+        ref     = REF,
+        bed     = "af_comparison/pool_positions.bed",
+    output:
+        mafs = "af_comparison/ind_pseudopool.mafs.gz",
+    params:
+        out_prefix  = "af_comparison/ind_pseudopool",
+        threads     = 4,
+    log:
+        "logs/founders_analyses/ind_pseudopool.log",
+    threads: 4
+    conda:
+        "envs/angsd.yaml"
+    shell:
+        r"""
+        # Convert BED to ANGSD sites format (1-based, tab-separated: chrom pos)
+        awk '{{print $1"\t"($2+1)}}' {input.bed} \
+            > af_comparison/angsd_sites.txt
+
+        angsd sites index af_comparison/angsd_sites.txt
+
+        angsd \
+            -b {input.bamlist} \
+            -ref {input.ref} \
+            -sites af_comparison/angsd_sites.txt \
+            -doMajorMinor 1 \
+            -doMaf 1 \
+            -GL 1 \
+            -SNP_pval 1e-2 \
+            -minMapQ 20 \
+            -minQ 20 \
+            -nThreads {params.threads} \
+            -out {params.out_prefix} \
+            > {log} 2>&1
+        """
+
+
+
+
+rule pool_freq_table:
+    input:
+        vcf = POOL_VCF,
+    output:
+        tsv = "af_comparison/pool_freq_table.tsv",
+    log:
+        "logs/founders_analyses/pool_freq_table.log",
+    conda:
+        "envs/bcftools.yaml"
+    shell:
+        r"""
+        # Extract CHROM, POS, REF, ALT, and FREQ for each founder pool
+        # FREQ field = alt allele frequency
+        echo -e "chrom\tpos\tref\talt\tF1G00\tF2G00\tF3G00\tF4G00" > {output.tsv}
+
+        bcftools query \
+            -s F1G00,F2G00,F3G00,F4G00 \
+            -f '%CHROM\t%POS\t%REF\t%ALT[\t%FREQ]\n' \
+            {input.vcf} \
+            >> {output.tsv} 2> {log}
+
+        echo "Sites extracted: $(wc -l < {output.tsv})" >> {log}
+        """
+
+
+
+
+rule af_comparison_figure:
+    input:
+        pool_freq = "af_comparison/pool_freq_table.tsv",
+        ind_mafs  = "af_comparison/ind_pseudopool.mafs.gz",
+    output:
+        fig   = "af_comparison/af_comparison_figure.png",
+        stats = "af_comparison/af_comparison_stats.tsv",
+    params:
+        script = "scripts/plot_af_comparison.py",
+    log:
+        "logs/founders_analyses/af_comparison_figure.log",
+    conda:
+        "envs/plotting_founders.yaml"
+    shell:
+        r"""
+        python {params.script} \
+            --pool-freq  {input.pool_freq} \
+            --ind-mafs   {input.ind_mafs} \
+            --output-fig {output.fig} \
+            --output-stats {output.stats} \
+            > {log} 2>&1
+        """

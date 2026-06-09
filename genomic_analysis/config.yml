@@ -1,0 +1,932 @@
+input_dir: "../v5_dedup_trim/mapping/filtered"
+reference_genome: "PATH/TO/DATA/sfla_v2.fa"
+#reference_genome: "PATH/TO/DATA/sfla_v2_short.fa"
+reference_fai: "PATH/TO/DATA/sfla_v2.fa.fai"
+reference_genome_name: "sfla_v2"
+reference_genome_annotation: "PATH/TO/DATA/sfla_v2.gff3"
+palaez: "palaez/sfla_v2.palaez.bed"
+#reference_genome_name: "sfla_v2_short"
+sample_metadata: "maps/sample_metadata.csv"
+#viz_positions: "maps/positions.txt"
+merge_map: "maps/merge_map.txt"
+poolsizes: "pool_sizes.tsv"
+freq_map: "maps/freq.txt"
+freq_change_map: "maps/freq_change.txt"
+levene_map: "maps/levene.txt"
+taj_map: "maps/tajimas.txt"
+tajp_map: "maps/tajimasp.txt"
+
+# Correction methods used 
+# 1.COV = raw coverage 
+# Machado2016
+# Rudman2022
+# Czech2023
+# Bergland2014
+
+
+#out_dir: "10000x1000"
+
+
+############################################################################################################################################################################################################
+#### Plots 
+############################################################################################################################################################################################################
+
+manhatten:
+    spacing: 5000000 
+    top_n: 8
+
+
+############################################################################################################################################################################################################
+#### Preprocessing 
+############################################################################################################################################################################################################
+
+create_bed: 
+    chunk_size: 500000
+    top_n_chrom: 781
+    chunks_freebayes: 100000
+
+fb_map: "maps/fb_map.txt"
+freebayes: 
+    #chunks: 100000
+    data_size: "100e4"
+    interval_size: 16384
+    QUAL: 20 #removes any sites with estimated probability of not being polymorphic less than phred 20 (aka 0.01), or probability of polymorphism > 0.99.
+    DP: 10 # depth filter
+    slop: 5 # number of base pairs on either end of a non-SNP variant that will be removed from the final list of variants 
+    BEST_N_ALLELES: 3 # When running with high --ploidy settings, it may be required to set --use-best-n-alleles to a low number to limit memory usage.
+    min_coverage: 10
+    read_max_mismatch_fraction: 0.95
+    min_base_quality: 20
+    min_mapping_quality: 20 
+
+# Indel Realignment 
+indel: 
+    jar_path: "GenomeAnalysisTK-3.5-0-g36282e4.tar.bz2"
+    extra: ""
+
+# Merging samples 
+merge_bams: 
+    extra: "-r -c -p"
+
+
+pileup_map: "maps/pileup.txt"
+# Generating a pileup file 
+mpileup:
+# TBD: Need to consider putting in -B and -C
+# -B Base Alignment Quality - important around indels
+# -C sets the coefficient for downgrading mapping quality for reads with excessive mismatches
+    min_map_quality: 25     # q Minimum mapping quality for an alignment to be used [0]
+    min_quality: 25         # Q Minimum base quality for a base to be considered. [13]
+#    rg_tag: "-B -C 50 --ignore-RG"   # Ignore RG tags. Treat all reads in one BAM as one sample.
+    rg_tag: "-B --ignore-RG"   # Ignore RG tags. Treat all reads in one BAM as one sample.
+
+# Generating a sync file 
+sync: 
+    min_qual: 20
+    threads: 1
+
+# Subsampling the sync file to even coverage. Uses subsample-synchronized.pl from popoolation
+subsample: 
+    method: "fraction" # withreplace, withoutreplace, fraction
+    target_coverage: 20
+    max_coverage: 50
+
+pfilter:
+    freq_column: "1.FREQ"
+    freq_cutoff_lower: 0.01 # The minimum uncorrected allele frequency for a variant within a treatment+population+generation to be considered in downstream analysis 
+    freq_cutoff_upper: 0.99 # The maximum uncorrected allele frequency for a variant within a treatment+population+generation to be considered in downstream analysis 
+    min_occurance_gen: 50 # percent of generation in which the allele is present above the frequency cutoff
+    min_occurance_pop: 50 # The number of populations in which the variant exists
+
+tabix: 
+    chunks: 10
+
+############################################################################################################################################################################################################
+##### Variant Calling  
+############################################################################################################################################################################################################
+
+# From DEST paper https://github.com/DEST-bio/DEST_freeze1/blob/main/snpCalling/PoolSNP/PoolSnp_README.md
+# python PoolSnp.py  # see DEST-bio PoolSNP: https://github.com/DEST-bio/DEST_freeze1 \
+# --sync testMpileup2Sync/joined_masked.sync.gz \
+# --min-cov 4 \
+# --max-cov 0.7 \
+# --min-count 4 \
+# --min-freq 0.01 \
+# --miss-frac 0.5 \
+# --names sample1,sample2 \
+# > testMpileup2Sync/joined.vcf
+
+sample_max_coverage: "maps/sample_max_coverage.txt"
+ind_map: "maps/ind.txt"
+poolsnp_map: "maps/poolsnp.txt"
+snape_map: "maps/snape.txt"
+variants_map: "maps/variants.txt"
+pfilter_map: "maps/pfilter.txt"
+fvariants_map: "maps/fvariants.txt"
+
+poolsnp: # from https://github.com/capoony/PoolSNP
+# Note that this seems to remove indels based on source code 
+# There is also a --base-quality-threshold and --coding (Illumina FASTQ quality coding) options. Not being used here because mpileup step does it. 
+# The default --base-quality-threshold in 15 (~3% chance of error, permissive)
+    #max-cov: 0.95 # MOVED TO MAP
+    # Maximum coverage is calculated for every library and chromosomal arm as the percentile of a coverage distribution; 
+    # e.g. max-cov=0.98 will only consider positions within the 98% coverage percentile for a given sample and chromosomal arm; 
+    # This cutoff can either be newly calculated by providing the threshold percentile or by providing the full path to a max-coverage file. 
+    # This needs to be tab-delimited with two columns, where the first contains the chromosome name and the second a comma-separated list of 
+    # coverage-thresholds corresponding in length to the number of samples in the mpileup file. 
+    # For example, if a max-cov threshold of 100 and 200 should be set for the first three and the last two samples in the mpileup file for chromosome 2L, 
+    # a typical line in the max-cov file should look like this: 2L 100,100,100,200,200
+    #min-cov: 20 # MOVED TO MAP
+    # Minimum coverage across all libraries; e.g. min-cov=10 will only consider positions with a minimum coverage >10
+    #min-count: 50 # MOVED TO MAP
+    # Minimum allele count of a minor allele across all libraries combined; e.g. min-count=10 will only consider a position as polymorphic 
+    # if the cumulative count of a minor allele across all samples in the input mpileup is equal or larger than the threshold
+    #min-freq: 0.1 # MOVED TO MAP
+    # Minimum allele frequency of a minor allele across all libraries combined; e.g. min-freq=10 will only consider a position as polymorphic 
+    # if the relative frequency of a minor allele calculated from cummulative counts across all samples in the input mpileup is equal or larger than the threshold
+    #miss-frac: 0 # MOVED TO MAP
+    # Missing fraction, is the maximum percentage of libraries that are allowed to NOT full-fill all above criteria; e.g. if miss-frac=0.2 is set, 
+    # the script will report sites even if 20% of all samples (e.g. 2 out of 10) do not fulfill the coverage criteria
+    jobs: 10
+    badsites: 1
+    allsites: 0
+    # All Sites, if all sites should be reported irrespective of whether they are polymorphic or not, you can set the parameter allsites=1. 
+    # Note, that this will disable the miss-frac parameter
+    bins: 50 # for the histogram output of the FREQ
+
+
+snape: 
+    # default 
+    fold: folded
+    
+    # default  
+    priortype: "informative"
+    
+    # From https://doi.org/10.1101/767160. 
+    # "Nucleotide diversity (π) was calculated per scaffold for four-fold
+    # degenerate sites using Popoolation Variance-sliding.pl for repeat-masked autosomal
+    # scaffolds (N = 819) greater than 20 kb in length. Parameters were: a ploidy level of 90,
+    # minimum allele count of two, minimum quality score of 20, minimum coverage of four,
+    # and a maximum coverage of 100."
+    theta: 0.0056
+    
+    # Used in DEST pipeline https://github.com/DEST-bio/DEST_freeze1/blob/main/snpCalling/PoolSNP/PoolSnp_README.md
+    d: 0.01
+    bins: 50 # for the histogram output of the 1-p(0)
+
+mapgd: 
+
+varscan:   
+
+fvariants: # parameters for final variants vcf 
+    correction: "Bergland2014"
+
+
+
+############################################################################################################################################################################################################
+##### haplovalidate  
+############################################################################################################################################################################################################
+
+hv_map: "maps/hv.txt"
+
+
+
+
+############################################################################################################################################################################################################
+##### PCA 
+############################################################################################################################################################################################################
+
+pca_map: "maps/pca.txt"
+
+pca: 
+  windowsize: 200
+  stepsize: 100
+  r2: 0.1
+  col: "1.FREQ"
+
+
+############################################################################################################################################################################################################
+##### Plotting 
+############################################################################################################################################################################################################
+
+fst_plot:   
+  outlier_threshold: 0.99 # 0.1% (or 1 in 1000) of the data points in the 'fst' column will be greater than this threshold value
+  spacing_between_chromosomes: 3200000
+  image_format: "png"
+  window: 20000 # for calling Fst window clusters. These are then used to find intervals for Fst peaks 
+
+
+
+############################################################################################################################################################################################################
+#### Fst
+############################################################################################################################################################################################################
+
+fst_map: "maps/fst.txt"
+
+poolfstat_map: "maps/poolfstat.txt"
+
+grenfst_map: "maps/grenfst.txt"
+
+grenfst_multiplot_map: "maps/grenfst_multiplot.txt"
+
+poolfstat: 
+#   out_dir: "10000x1000"
+#   variants: "poolsnp"
+  computeFST: 
+    method: "Anova"     # ARG 4: computeFST method: default is Anova. Hivert et al (2018, eq. 9)
+    bjack: 10            # ARG 5: nsnp.per.bjack.block. Default is 0 = no block jackknife sampling
+    window: 500          # ARG 6: sliding.window.size: Number of consecutive SNPs within a window for multi-locus computation of Fst over sliding window with half-window size step (default=0, i.e., no slidingwindow scan)
+    step: 5
+
+
+# # Getting random intervals but excluding intervals that include Fst peaks
+# random_intervals: 
+#     intervals_to_exclude: "TG10_merged,BG10_merged" # The Fst pairwise comparison from which the Fst peak intervals are gathered. These intervals are excluded from the random interval generation process. 
+
+founder_reps: "F1,F2,F3,F4"
+founder_gen: "00"
+mixture_reps: "M1,M2,M3,M4"
+
+############################################################################################################################################################################################################
+#### Divergence Visualization
+############################################################################################################################################################################################################
+
+viz_top_n: 20
+viz_candidate_window: 500000
+viz_target_reps: "T1,T2,T3,T4"
+viz_ref_reps: "B1,B2,B3,B4"
+viz_vcf: "fvariants/fvOG_e10fe9w.fixed_no_neff.vcf.gz"
+viz_fst_csv: "grenfst/fst_queue/e10fe9wGREN_500000_1000.csv"
+viz_stats_csv: "grenfst/divergence_mixture_lmm/e10Ffe9wGREN_btwTB_500000_1000/divergence_stats.csv"
+
+
+############################################################################################################################################################################################################
+#### CMH Test
+############################################################################################################################################################################################################
+
+cmh_map: "maps/cmh.txt"
+cmh2_map: "maps/cmh2.txt"
+
+cmh: # from https://github.com/popgenvienna/popoolation2/blob/master/cmh-test.pl
+    # the minimum coverage; used for SNP identification, 
+    # the coverage in ALL selected populations has to be higher or equal to this threshold, 
+    # otherwise no SNP will be called. default=4
+    min-coverage: 4 
+    # The maximum coverage; All selected populations are required to have coverages 
+    # lower or equal than the maximum coverage; Mandatory
+    # The maximum coverage may be provided as one of the following:
+    # '500' a maximum coverage of 500 will be used for all populations
+    # '300,400,500' a maximum coverage of 300 will be used for the first population, a maximum coverage of 400 for the second population and so on
+    # '2%' the 2% highest coverages will be ignored, this value is independently estimated for every population
+    max-coverage: 100
+    # the minimum count of the minor allele; used for SNP identification. SNPs will be identified 
+    # considering all populations simultanously. default=2 
+    # The minimum count may be provided as one of the following two ways:
+    min-count: 2
+    # The name of the corrected sync file to use 
+    correction: "Czech2023"
+    # Used in plotting 
+    significance_threshold: 0.05
+
+cmh2:
+
+
+############################################################################################################################################################################################################
+#### GLM 
+############################################################################################################################################################################################################
+
+glm_map: "maps/glm.txt"
+glm_permute_map:  "maps/glm_permutations.txt"
+fdr_permuted_map: "maps/fdr_permuted.txt"
+glm_window: "maps/glm_window.txt"
+gglm_map: "maps/gglm.txt"
+dg_map: "maps/dg.txt"
+glmcomp_map: "maps/glmcomp.txt"
+glmtimeplot_map: "maps/glmtimeplot.txt" #map of which input populations should be used to plot freq over time 
+
+glm: 
+    # neff_column: "Czech2023" # This is now set in the glm map file 
+    variables: "SourceFile,gen,trt,pop" # note that specific trts can be specified in the glm map file
+    mainEffect: NA
+    effect1: "gen"
+    effect1type: "continuous" # continuous or categorical
+    effect2: "trt"
+    effect2type: "categorical" # continuous or categorical
+    interaction: "TRUE" # Add an interaction between effect 1 and effect 2? TRUE or FALSE
+    repName: "pop" # Need to be set even if rep is not being used in the model
+    repNamecontrast: "M" # sum or alt
+    repNameignore: "FALSE" # Ignore rep as a predictor? TRUE or FALSE
+    repNameinter: "FALSE" # Add an interaction with rep? TRUE or FALSE
+    repNameeff: "gen" # If adding an interaction with rep, which effect? NA or effect name
+    trtPopGroups: "FALSE"
+    trtContrast: "M" # Either one of the trt factors or NA
+    mixedEffects: "TRUE"
+    compareModels: "TRUE"
+    makePlots: "TRUE"
+    saveModels: "FALSE"
+    split_bins: 1
+    selectTrts: "B,T,M"
+    
+    # plotting stuff 
+    pval1: "p.gen.trt_popT_2"
+    pval2: "p.gen"
+    
+    # used for glm subsets 
+    min_freq: 0
+    max_freq: 0.5
+    increment: 0.05
+    
+    # Used for viz of single GLMs
+    dis_gen_min: 0 # The minimum value of estimated dispersion from the fitted GLM model
+    dis_gen_max: 2 # The maximum value of estimated dispersion from the fitted GLM model
+    pval_cutoff: 0.9 # All values less than this value will be excluded from viz
+    
+    # Used for comparisons between GLMs
+    pval_cutoff: 0.004
+    beta_cutoff1_upper: 0.08
+    beta_cutoff1_lower: -0.08
+    beta_cutoff2_upper: 0.08
+    beta_cutoff2_lower: -0.08
+    
+    # For permutation analysis
+    fdr_low: 0
+    fdr_high: 0.05
+    fdr_bins: 100
+    dispersion_max: 10
+    
+
+
+
+############################################################################################################################################################################################################
+#### DELTA
+############################################################################################################################################################################################################]
+
+delta_map: "maps/delta.txt"
+
+delta: 
+  glm_preprocessing_file: "glmBTf10v2"
+
+
+############################################################################################################################################################################################################
+#### lynch
+############################################################################################################################################################################################################]
+
+lynch_map: "maps/lynch.txt"
+
+
+############################################################################################################################################################################################################
+#### POOLSIM
+############################################################################################################################################################################################################]
+
+
+poolsim_map: "maps/poolsim.txt"
+
+poolsim: 
+  sets: 100
+
+############################################################################################################################################################################################################
+#### Grenedalf options (Fst, Freq, Tajima's D)
+############################################################################################################################################################################################################
+
+grenedalf:   
+  input_call: "--sam-path"
+  input_call_freq: "--sam-path"
+  input_call_taj: "--pileup-path"
+  input_call_sync: "--vcf-path"
+  
+  input_options: 
+    "--sam-min-base-qual 30 \
+    --sam-min-map-qual 30 \ 
+    --sam-flags-exclude-any UNMAP,MUNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY"
+
+  input_options_freq: 
+    "--sam-min-base-qual 30 \
+    --sam-min-map-qual 30 \ 
+    --sam-flags-exclude-any UNMAP,MUNMAP,SECONDARY,QCFAIL,DUP,SUPPLEMENTARY"
+ 
+  input_options_taj: 
+    ""
+   
+#   window:
+#     "--window-type queue \
+#     --window-queue-count 50 \
+#     --window-queue-stride 1"
+  
+  ##### filter ######
+  filter_fst: 
+    "--filter-sample-min-count 3 \
+    --filter-sample-min-coverage 10 \
+    --filter-sample-max-coverage 500"
+  
+  # Moved to taj map 
+#   filter_taj: 
+#     "--filter-sample-min-count 2 \
+#     --filter-sample-min-coverage 10 \
+#     --filter-sample-max-coverage 500"  
+  
+  freq_settings: 
+    "--write-sample-counts \
+    --write-sample-coverage \
+    --write-sample-ref-freq"
+  
+  filter_region:
+    "--filter-region-bed"
+  
+  filter: 
+    "--filter-sample-min-count 2 \
+    --filter-sample-min-coverage 10 \
+    --filter-sample-max-coverage 500"
+  
+  ##### other #### 
+  pool_sizes: "PATH/TO/DATA/pool_sizes.tsv"  
+  method: "unbiased-nei"
+  measure: "all"
+  reference-genome-fai-file: "PATH/TO/DATA/sfla_v2.fa.fai"
+  separator-char: "comma"
+  extra: "--verbose"
+  
+  # --write-invariants 
+  extra_freq: "--verbose"
+  
+  threads: 1
+  out_dir: "10000x1000"
+  out_dir_freq: "freq"
+  out_dir_taj: "tajimas_10000x100"
+
+
+
+
+############################################################################################################################################################################################################
+#### Mimicree2 simulation
+############################################################################################################################################################################################################
+
+mimicree:
+  # Window sizes (bp) used when computing null PBS from simulated data.
+  # Should match the empirical window sizes used in the timeslice heatmap.
+  # How many replicates to include in the null distribution.
+  # Must match how many sim{rep}_B.sync and sim{rep}_T.sync exist in
+  # mimicree/combined_resampled/ (currently 100).
+  null_reps: 100
+
+  null_pbs_windows:
+    - 50000
+    - 110000
+    - 200000
+    - 500000
+    - 1000000
+    - 2000000
+
+  # Per-treatment selection regime.
+  # Set selection_regime to null for a neutral simulation.
+  # Set to the path of a Mimicree2 --sr-loci-file to inject selection.
+  treatments:
+    B:
+      selection_regime: ~
+    T:
+      selection_regime: ~
+    M:
+      selection_regime: ~
+
+
+
+# ==============================================================================
+# FOCUSED MIMICREE PBS — candidate-region simulation pipeline
+# ==============================================================================
+focused_mimicree:
+
+  # ── Region identification ──────────────────────────────────────────────────
+  # Path to candidate_regions.tsv (generated by focused_select_regions rule).
+  # Commit this file after running select_candidate_regions.py so the
+  # simulation wildcard expansion is stable across cluster runs.
+  candidate_regions: "focused_mimicree/candidate_regions.tsv"
+
+  # Empirical analysis name whose divergence_stats.csv is used for region
+  # selection and empirical PBS extraction.  Must match a key in
+  # grenfst/divergence_mixture_lmm/.
+  empirical_analysis: "e10Ffe9wGREN_btwTB_200000_1000"
+  # LMM output directory — set to _old while re-run is in progress.
+  # Update to "grenfst/divergence_mixture_lmm" once new run completes.
+  empirical_lmm_dir: "grenfst/divergence_mixture_lmm_old"
+
+  # ── Region selection parameters ───────────────────────────────────────────
+  # Top-N seed windows ranked by (z_pbsn1 + z_pbsn1_ref) / 2
+  top_n: 10
+
+  # Stop extending a region once the per-window combined z-score drops below
+  # (1 - drop_fraction) * seed_max.  0.5 = stop at 50% of seed maximum.
+  drop_fraction: 0.5
+
+  # ── Simulation parameters ─────────────────────────────────────────────────
+  # Number of neutral simulation replicates per candidate region.
+  # Each rep runs 4 T + 4 B + 4 M MimicrEE2 sims to reproduce the empirical
+  # 4-replicate-per-treatment design, yielding 64 T×B×M trios per rep for
+  # LMM fitting on the null. 2500 reps → min p-value 4e-4 (ample for the
+  # 6-region Bonferroni threshold of 8.3e-3). Compute equivalent to the
+  # earlier 10k × 3-sim plan.
+  n_reps: 2500
+
+  # Number of MimicrEE2 replicate lineages per treatment (matches empirical
+  # design: 4 T, 4 B, 4 M). Changing this requires coordinated updates to
+  # rename/comps rules and the LMM fitting.
+  n_lineages_per_trt: 4
+
+  # Genomic window size (bp) for grenedalf FST in simulations.
+  # Should match the empirical_analysis window size above.
+  # Change both together if switching from 200 kb.
+  window_size: 200000
+
+  # Histogram bins for null distribution plots
+  histogram_bins: 80
+
+
+############################################################################################################################################################################################################
+#### SLiM
+############################################################################################################################################################################################################
+
+slim: 
+  levene_ap: "scripts/slim/expevol_antag_pleiotropy.slim"
+  params: "10000_20000_30000_40000_50000_60000_70000"
+
+
+
+############################################################################################################################################################################################################
+#### Scripts 
+############################################################################################################################################################################################################
+
+scripts:
+  extract_chromosomes: "scripts/extract_chrom.py"
+  fst_table: "scripts/fst_table.py"
+  plot_fst: "scripts/plot_fst.py"
+  freq_change: "scripts/freq_change.py"
+  levene: "scripts/levene.py"
+  computeFST: "scripts/computeFST.r"
+  get_chroms: "scripts/get_chroms.py"
+  calculate_neff: "scripts/calculate_neff.py"
+  calculate_neff_poolsnp: "scripts/calculate_neff_poolsnp.py"
+  combine_freq: "scripts/combine_freq.py"
+  combine_freq_poolsnp: "scripts/combine_freq_poolsnp.py"
+  split_batch: "scripts/split_batch.sh"
+  pfilter: "scripts/pfilter.py"
+  glm_preprocessing: "scripts/glm_preprocessing.py"
+  glm_gethaf: "scripts/glm_gethaf.r"
+  #glm: "scripts/glm.r"
+  #glm: "scripts/glm_new.r"
+  glm: "scripts/glmm.r"
+  LRT: "scripts/LRT.r"
+  glm_window: "scripts/glm_window.r"
+  glm_window2: "scripts/glm_window2.r"
+  add_freq: "scripts/add_freq.py"
+  glm_subsets: "scripts/glm_subsets.py"
+  glm_permute: "scripts/glm_permute.py"
+  poolsnp_hist: "scripts/poolsnp_hist.py"
+  snape_hist: "scripts/snape_hist.py"
+  glmcomp: "scripts/glmcomp.py"
+  glmtimeplot: "scripts/glmtimeplot.py"
+  correct_sync: "scripts/correct_sync.py"
+  filterpileup: "scripts/filterpileup.py"
+  plot_cmh: "scripts/plot_cmh.py"
+  fdr: "scripts/fdr.r"
+  plot_glm_manhatten: "scripts/plot_glm_manhatten.py"
+  plot_glm_manhatten2: "scripts/plot_glm_manhatten2.py"
+  plot_glm_manhattenr: "scripts/plot_glm_manhatten.r"
+  plot_glm_distributions: "scripts/plot_glm_distributions.r"
+  plot_glm_fdr: "scripts/plot_glm_fdr.r"
+  final_variants: "scripts/final_variants.sh"
+  final_variants_agg: "scripts/final_variants_agg.sh"
+  #aggregate_final_variants: "scripts/aggregate_final_variants.py"
+  pcaplot_evo: "scripts/pcaplot_evo.r"
+  make_single_bed: "scripts/make_single_bed.sh"
+  tabix: "scripts/tabix.py"
+  variant_chunks: "scripts/variant_chunks.sh"
+  neff_vcf: "scripts/neff_vcf.py"
+  subset_ncorrect: "scripts/subset_ncorrect.py"
+  get_ncorrect: "scripts/get_ncorrect.py"
+  af_matrix: "scripts/af_matrix.py"
+  merge_matrix: "scripts/merge_matrix.py"
+  pcadapt: "scripts/pcadapt.r"
+  convert_vcf: "scripts/convert_vcf.py"
+  convert_glm: "scripts/convert_glm.py"
+  deltaf: "scripts/deltaf.py"
+  lynch: "scripts/lynch.py"
+  lynch_ne: "scripts/lynch_ne.py"
+  get_poolsizes: "scripts/get_poolsizes.py"
+  mimicr_hap: "scripts/mimicr_hap.py"
+  mimicr_sync_convert: "scripts/mimicr_sync_convert.py"
+  poolseq_base: "scripts/poolseq_base.r"
+  poolseq_sample: "scripts/poolseq_sample.r"
+  poolseq_sample2: "scripts/poolseq_sample2.r"
+  poolseq_select: "scripts/poolseq_select.r"
+  subset_variants_poolsim: "scripts/subset_variants_poolsim.py"
+  fix_vcf: "scripts/fix_vcf.sh"
+  simple_hist: "scripts/simple_hist.py"
+  split_ref_by_bai_datasize: "scripts/split_ref_by_bai_datasize.py"
+  window_sites: "scripts/window_sites.py"
+  gene_sites: "scripts/gene_sites.py"
+  cds_sites: "scripts/cds_sites.py"
+  slop: "scripts/slop.sh"
+  fb_stats: "scripts/fb_stats.sh"
+  wild_sites: "scripts/wild_sites.py"
+  filter_glm: "scripts/filter_glm.py"
+  pca_subset: "scripts/pca_subset.py"
+  pca_input: "scripts/pca_input.py"
+  multiFST_plot: "scripts/multiFST_plot.py"
+  fst_slope: "scripts/fst_slope.py"
+  fst_slope_resid: "scripts/fst_slope_resid.py"
+  fst_slope_peaks: "scripts/fst_slope_peaks.py"
+  fst_slope_plot: "scripts/fst_slope_plot.py"
+  fst_slope_plot_lmm: "scripts/fst_slope_plot_lmm.py"
+  plot_residuals: "scripts/plot_residuals.py"
+  plot_residuals_xy: "scripts/plot_residuals_xy.py"
+  go_enrich: "scripts/go_enrich.py"
+  go_compare: "scripts/go_compare.py"
+  sample_sync: "scripts/sample_sync.py"
+  outflank: "scripts/outflank.py"
+  outflank_plot: "scripts/outflank_plot.py"
+  plot_fst_snp_density: "scripts/plot_fst_snp_density.py"
+  plot_scale_space_filtered: "scripts/plot_scale_space_filtered.py"
+  plot_scale_space_all: "scripts/plot_scale_space_all.py"
+  concat_bins: "scripts/concat_bins.py"
+  final_plot_fst_glm: "scripts/final_plot_fst_glm.py"
+  window_glm_aligned_v3: "scripts/window_glm_aligned_v3.py"
+  window_glm_aligned_v3_interactive: "scripts/window_glm_aligned_v3_interactive.py"
+  plot_divergence_sensitivity:  "scripts/plot_divergence_sensitivity.py"
+  plot_lrt_zooms: "scripts/plot_lrt_zooms.py"
+
+programs:
+  grenedalf: "PATH/TO/software/grenedalf/bin/grenedalf" #outdated. Switched to using conda env 
+  popoolation2: "PATH/TO/software/popoolation2_1201"
+  poolsnp: "PATH/TO/software/PoolSNP"
+  snape: "PATH/TO/software/snape-pooled/snape-pooled"
+  mimicree2: "PATH/TO/software/mimicree2/mim2-v206.jar"
+  poolseq-r: "PATH/TO/software/poolSeq-0.3.5.tar.gz"
+  haploreconstruct: "https://github.com/popgenvienna/haploReconstruct/archive/refs/tags/v0.1.3_3.tar.gz"
+  haplovalidate: "https://github.com/kathrinannaotte/haplovalidate/archive/refs/tags/v0.1.5.tar.gz"
+
+
+environments:
+  polars: "envs/polars.yml"
+  gatk3: "envs/gatk3.yml"
+  samtools: "envs/samtools.yml"
+  bedtools: "envs/bedtools.yml"
+  slim: "envs/slim.yml"
+  poolfstat: "envs/poolfstat.yml"
+  base_r: "envs/r-base.yml"
+  poolsnp: "envs/poolsnp.yml"
+  snape: "envs/snape.yml"
+  bcftools: "envs/bcftools.yml"
+  htslib: "envs/htslib.yml"
+  plink2: "envs/plink2.yml"
+  pcadapt: "envs/pcadapt.yml"
+  seaborn: "envs/seaborn.yml"
+  grenedalf: "envs/grenedalf.yml" #currently v0.6.2
+  poolseq-r: "envs/poolseq-r.yml"
+  repeatmodeler: "envs/repeatmodeler.yml"
+  freebayes: "envs/freebayes.yml"
+  numpy: "envs/numpy.yml"
+  scipy: "envs/scipy.yml"
+  statsmodels: "envs/statsmodels.yml"
+  r_arrow: "envs/r_arrow.yml"
+  
+
+
+#############################################################################################################################################################################################################
+#### Resources 
+#############################################################################################################################################################################################################
+
+
+default_resources:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=d1 \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=1 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+# ── Focused Mimicree resources (${SLURM_ACCOUNT} / savio3_htc) ─────────────────
+# Uses savio3_htc so these jobs don't compete with the running savio4_htc pipeline.
+foc_default_resources:
+  "--account=${SLURM_ACCOUNT} \
+  --time=00:10:00 \
+  --ntasks-per-node=1 \
+  --job-name=foc1 \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=1 \
+  --qos=savio_lowprio \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+foc_default_resources_2cpus:
+  "--account=${SLURM_ACCOUNT} \
+  --time=04:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=foc2 \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=2 \
+  --qos=savio_lowprio \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+highmem_resources:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=fb \
+  --partition=savio3_bigmem \
+  --nodes=1 \
+  --cpus-per-task=32 \
+  --qos=savio_lowprio \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_2cpus:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=f5 \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=2 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_5cpus:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=f5 \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=5 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_10cpus:
+  "--account=${SLURM_ACCOUNT} \
+  --time=10:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=fb \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=10 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_24cpus:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=freq \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=24 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_40:
+  "--account=${SLURM_ACCOUNT} \
+  --time=24:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=freq \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=40 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_56:
+  "--job-name=rm
+  --account=${SLURM_ACCOUNT}
+  --partition=savio4_htc
+  --nodes=1
+  --ntasks-per-node=1
+  --cpus-per-task=56
+  --time=24:00:00
+  --qos=rosalind_htc4_normal
+  --mail-type=END,FAIL
+  --mail-user=${USER_EMAIL}"
+
+
+default_resources_noslurm:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=freq \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=1 \
+  --qos=savio_lowprio \
+  --output=/dev/null"
+  
+default_resources_8thread:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=sub \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=8 \
+  --qos=savio_lowprio \
+  --exclude=n0032.savio4 \
+  --output=slurm/%j.out \
+  --error=slurm/%j.err"
+
+default_resources_8thread_noslurm:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=grn \
+  --partition=savio4_htc \
+  --nodes=1 \
+  --cpus-per-task=8 \
+  --qos=savio_lowprio \
+  --output=/dev/null"
+
+default_resources_56thread:
+  "--job-name=gren
+  --account=${SLURM_ACCOUNT}
+  --partition=savio4_htc
+  --nodes=1
+  --ntasks-per-node=1
+  --cpus-per-task=56
+  --time=72:00:00
+  --qos=rosalind_htc4_normal
+  --mail-type=END,FAIL
+  --mail-user=${USER_EMAIL}"
+
+default_resources_40thread:
+  "--job-name=gren
+  --account=${SLURM_ACCOUNT}
+  --partition=savio3
+  --nodes=1
+  --ntasks-per-node=1
+  --cpus-per-task=40
+  --time=72:00:00
+  --qos=rosalind_htc4_normal
+  --mail-type=END,FAIL
+  --mail-user=${USER_EMAIL}"
+  
+default_resources_24thread:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=cha \
+  --partition=savio3_htc \
+  --nodes=1 \
+  --cpus-per-task=24 \
+  --qos=rosalind_htc4_normal \
+  --mail-type=END,FAIL \
+  --mail-user=${USER_EMAIL}"
+
+default_resources_15thread:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=cha \
+  --partition=savio3_htc \
+  --nodes=1 \
+  --cpus-per-task=15 \
+  --qos=rosalind_htc4_normal \
+  --mail-type=END,FAIL \
+  --mail-user=${USER_EMAIL}"
+  
+default_resources_10thread:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=1 \
+  --job-name=cha \
+  --partition=savio3_htc \
+  --nodes=1 \
+  --cpus-per-task=10 \
+  --qos=rosalind_htc4_normal \
+  --mail-type=END,FAIL \
+  --mail-user=${USER_EMAIL}"
+  
+gpu_resources:
+  "--account=${SLURM_ACCOUNT} \
+  --time=72:00:00 \
+  --ntasks-per-node=2 \
+  --job-name=gpu \
+  --partition=savio3_gpu \
+  --nodes=1 \
+  --cpus-per-task=4 \
+  --qos=savio_lowprio \
+  --mail-type=END,FAIL \
+  --mail-user=${USER_EMAIL} \
+  --gres=gpu:2"

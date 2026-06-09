@@ -1,0 +1,492 @@
+test_chrom: 
+#"chr_ScDA7r2_110_HRSCAF_295"
+
+# =================================================================================================
+#     Input Data
+# =================================================================================================
+
+data:
+
+  # Needed. Samples table that lists all samples with their units (re-sequencing runs) and fastq files.
+  # The path to the table file itself, as well as the paths to the fastq files within the table need
+  # to be absolute! No relative paths (e.g., `../data`), and no paths using shortcuts such as `~`.
+  # See the wiki (https://github.com/lczech/grenepipe/wiki) for the expected format.
+  samples-table: "PATH/TO/DATA/IND/samples.tsv"
+
+  # Needed. Path to the reference genome in fasta format.
+  # Path needs to be absolute! No relative path (e.g., `../ref`), and no paths using shortcuts
+  # such as `~`.
+  # We expect that each sequence in the file represents a chromsome, contig, or scaffold.
+  reference-genome: "PATH/TO/DATA/sfla_v2.fa"
+
+  # Optional. Path to any database of known variants (in vcf or vcf.gz format),
+  # ideally as it is provided by the GATK bundle.
+  # Use an empty list or string instead, if there is no reference of known variants or if you
+  # want to call variant without this guided approach. Path needs to be absolute, as above.
+  known-variants: ""
+
+  # Optional. Number of distinct samples that are expect to be in the above samples table.
+  # This serves as a consistency check, and is recommended to use, but not necessary.
+  # NOTE: Set from MultiQC / qualimap coverage histograms (192 samples total).
+  samples-count: 192
+
+# =================================================================================================
+#     Pipeline Settings
+# =================================================================================================
+
+settings:
+
+  # ----------------------------------------------------------------------
+  #     Basic Steps
+  # ----------------------------------------------------------------------
+
+  # Trimming
+  trimming-tool: "fastp"
+  merge-paired-end-reads: false
+
+  # Mapping
+  mapping-tool: "bwamem"
+
+  # Filter mapped reads (good to keep for low-cov individuals; MAPQ 20 is a standard compromise)
+  filter-mapped-reads: true
+
+  # Overlap clipping: safe to leave off for GATK/HaplotypeCaller, which accounts for read pairs
+  clip-read-overlaps: false
+
+  # Duplicates: keep removal ON given very high duplicate rates in MultiQC (~70%+).
+  remove-duplicates: true
+  duplicates-tool: "picard"
+  
+  # No base recalibration (no good known-variants set)
+  recalibrate-base-qualities: false
+
+  # Variant calling
+  calling-tool: "haplotypecaller"
+
+  # Contig grouping to reduce job count
+  contig-group-size: 15000000
+
+  # Restrict regions (keep empty to use whole genome)
+  restrict-regions: ""
+
+  # Variant filtering: GATK hard filters as a standard starting point
+  filter-variants: "gatk-variantfiltration"
+
+  # Keep intermediates so you can inspect things while you tune filters
+  keep-intermediate:
+    trimming: true
+    mapping: true
+    calling: true
+    filtering: true
+
+  # ----------------------------------------------------------------------
+  #     Optional Steps
+  # ----------------------------------------------------------------------
+
+  snpeff: false
+  vep: false
+  bcftools-stats: true
+  mapdamage: false
+  damageprofiler: false
+
+  # Pileups: per-sample + merged, useful for QC on such low coverage
+  pileups: ["individual-samples", "all-merged-samples"]
+
+  # HAFpipe is only for pool-seq; this is individual low-coverage, so keep off
+  hafpipe: false
+
+  # Frequency table from VCF (will be noisy; filter later by DP/GQ)
+  frequency-table: true
+  frequency-table-fields: "COV,FREQ,REF_CNT,ALT_CNT"
+
+# =================================================================================================
+#     Tool Parameters
+# =================================================================================================
+
+params:
+
+  # ----------------------------------------------------------------------
+  #     adapterremoval
+  # ----------------------------------------------------------------------
+
+  adapterremoval:
+    threads: 4
+    se: ""
+    pe: ""
+
+  # ----------------------------------------------------------------------
+  #     cutadapt
+  # ----------------------------------------------------------------------
+
+  cutadapt:
+    threads: 4
+    se:
+      adapters: "-a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC"
+      extra: "-q 20"
+    pe:
+      adapters: "-a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC"
+      extra: "-q 20"
+
+  # ----------------------------------------------------------------------
+  #     fastp
+  # ----------------------------------------------------------------------
+
+  fastp:
+    threads: 4
+    se: ""
+    pe: "--detect_adapter_for_pe \
+    --trim_poly_g --poly_g_min_len 10 \
+    --cut_front --cut_front_window_size 4 \
+    --cut_front_mean_quality 25 \
+    --cut_tail \
+    --cut_tail_window_size 4 \
+    --cut_tail_mean_quality 20 \
+    --length_required 60 \
+    --trim_front1 6 \
+    --trim_front2 8"
+
+  # ----------------------------------------------------------------------
+  #     seqprep
+  # ----------------------------------------------------------------------
+
+  seqprep:
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     skewer
+  # ----------------------------------------------------------------------
+
+  skewer:
+    threads: 4
+    se: "--mode any"
+    pe: "--mode pe"
+
+  # ----------------------------------------------------------------------
+  #     trimmomatic
+  # ----------------------------------------------------------------------
+
+  trimmomatic:
+    threads: 6
+    se:
+      extra: ""
+      trimmer:
+        - "LEADING:3"
+        - "TRAILING:3"
+        - "SLIDINGWINDOW:4:15"
+        - "MINLEN:36"
+    pe:
+      extra: ""
+      trimmer:
+        - "LEADING:3"
+        - "TRAILING:3"
+        - "SLIDINGWINDOW:4:15"
+        - "MINLEN:36"
+        # - "ILLUMINACLIP:/path/to/adapters/TruSeq3-PE-2.fa:2:30:10:2:True"
+
+  # ----------------------------------------------------------------------
+  #     bowtie2
+  # ----------------------------------------------------------------------
+
+  bowtie2:
+    threads: 12
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     bwa aln
+  # ----------------------------------------------------------------------
+
+  bwaaln:
+    threads: 4
+    extra: ""
+    extra-sam: ""
+
+  # ----------------------------------------------------------------------
+  #     bwa mem
+  # ----------------------------------------------------------------------
+
+  bwamem:
+    threads: 12
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     bwa mem2
+  # ----------------------------------------------------------------------
+
+  bwamem2:
+    threads: 12
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     samtools
+  # ----------------------------------------------------------------------
+
+  samtools:
+    merge: ""
+    merge-threads: 4
+
+    # MAPQ filter between mapping and downstream steps
+    view: "-q 20"
+
+    pileup: "-d 10000"
+    sort: "-m 4G"
+
+    stats-bams: "processed"
+    flagstat-bams: "processed"
+    temp-dir: ""
+
+  # ----------------------------------------------------------------------
+  #     BamUtil
+  # ----------------------------------------------------------------------
+
+  bamutil:
+    extra: "--params --stats"
+
+  # ----------------------------------------------------------------------
+  #     picard
+  # ----------------------------------------------------------------------
+
+  picard:
+
+    # Keep REMOVE_DUPLICATES=true given high duplicate rates and to keep GLs honest
+    MarkDuplicates: "REMOVE_DUPLICATES=true VALIDATION_STRINGENCY=SILENT"
+
+    CollectMultipleMetrics:
+      AlignmentSummaryMetrics: true
+      BaseDistributionByCycle: true
+      GcBiasMetrics: true
+      InsertSizeMetrics: true
+      QualityByCycleMetrics: true
+      QualityScoreDistributionMetrics: true
+      QualityYieldMetrics: true
+
+    CollectMultipleMetrics-extra: "VALIDATION_STRINGENCY=LENIENT METRIC_ACCUMULATION_LEVEL=null METRIC_ACCUMULATION_LEVEL=SAMPLE"
+    CollectMultipleMetrics-bams: "processed"
+
+    MarkDuplicates-java-opts: "-Xmx10g"
+    CollectMultipleMetrics-java-opts: ""
+    SortVcf-java-opts: ""
+
+  # ----------------------------------------------------------------------
+  #     dedup
+  # ----------------------------------------------------------------------
+
+  dedup:
+    extra: "-m"
+
+
+  # ----------------------------------------------------------------------
+  #     angsd
+  # ----------------------------------------------------------------------
+
+  angsd:
+    threads: 32
+    extra: "-minInd 96 -minMaf 0.01"
+    
+  stitch:
+    K: 16
+    nGen: 50         # adjust if you know your colony is much younger/older
+    threads: 16
+    environment: "server"
+    tempdir: "stitch/tmp"
+
+  smcpp:
+    population: "SfColony"
+    mu: 2.8e-9
+    threads: 8
+
+  pyrho:
+    mu: 2.8e-9
+    samplesize: 384          # 2 * num_diploids
+    popsizes:   [5000, 50000, 200000] 
+    epochtimes: [0, 500, 5000] 
+    approx: false
+    moran_pop_size: 0
+    ploidy: 2
+    windowsize: 2000
+    blockpenalty: 20.0
+    threads: 16
+
+
+
+
+
+
+  # ----------------------------------------------------------------------
+  #     bcftools (not used here for calling, but keep defaults)
+  # ----------------------------------------------------------------------
+
+  bcftools:
+    threads: 8
+    mode: "combined"
+    mpileup: "--max-depth 10000"
+    call: "--multiallelic-caller"
+    stats: ""
+    stats-plot: ""
+
+  # ----------------------------------------------------------------------
+  #     freebayes
+  # ----------------------------------------------------------------------
+
+  freebayes:
+    extra: ""
+    threads: 8
+    compress-threads: 2
+    chunksize: 100000
+
+  # ----------------------------------------------------------------------
+  #     gatk
+  # ----------------------------------------------------------------------
+
+  gatk:
+    BaseRecalibrator: ""
+    platform: ""
+
+    # HaplotypeCaller: leave extras empty; defaults are fine for low-cov GVCF calling
+    HaplotypeCaller-extra: ""
+    CombineGVCFs-extra: ""
+    GenotypeGVCFs-extra: ""
+
+    HaplotypeCaller-java-opts: ""
+    CombineGVCFs-java-opts: ""
+    GenotypeGVCFs-java-opts: ""
+
+    HaplotypeCaller-threads: 2
+
+  # ----------------------------------------------------------------------
+  #     GATK VariantFiltration
+  # ----------------------------------------------------------------------
+
+  gatk-variantfiltration:
+    SNP: "QD < 2.0 || FS > 60.0 || MQ < 40.0 || MQRankSum < -12.5 || ReadPosRankSum < -8.0"
+    INDEL: "QD < 2.0 || FS > 200.0 || ReadPosRankSum < -20.0"
+    extra: ""
+    java-opts: ""
+
+  # ----------------------------------------------------------------------
+  #     GATK VariantRecalibrator + ApplyVQSR
+  # ----------------------------------------------------------------------
+
+  gatk-vqsr:
+    resources:
+      1001G:
+        - known: false
+        - training: true
+        - truth: true
+        - prior: 10.0
+    resource-files:
+      1001G: "#BASEPATH#/test/reference/known-variants.vcf.gz"
+    annotation:
+      - "DP"
+      # - "QD"
+      # - "MQ"
+      # - "MQRankSum"
+      # - "ReadPosRankSum"
+      # - "FS"
+      # - "SOR"
+    extra-variantrecalibrator-SNP: "--max-gaussians 1"
+    extra-variantrecalibrator-INDEL: "--max-gaussians 1"
+    java-variantrecalibrator: ""
+    extra-applyvqsr-SNP: "--truth-sensitivity-filter-level 99.0"
+    extra-applyvqsr-INDEL: "--truth-sensitivity-filter-level 99.0"
+    java-applyvqsr: ""
+
+  # ----------------------------------------------------------------------
+  #     bcftools filter
+  # ----------------------------------------------------------------------
+
+  bcftools-filter:
+    tool: "filter"
+    SNP: "-sFilterName -e'INFO/DP<5'"
+    INDEL: "-sFilterName -e'INFO/DP<5'"
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     snpeff
+  # ----------------------------------------------------------------------
+
+  snpeff:
+    name: "Arabidopsis_thaliana"
+    download-dir: ""
+    custom-db-dir: ""
+    extra: "-Xmx4g"
+
+  # ----------------------------------------------------------------------
+  #     VEP
+  # ----------------------------------------------------------------------
+
+  vep:
+    species: "arabidopsis_thaliana"
+    build: "TAIR10"
+    release: 104
+    cache-url: "ftp://ftp.ebi.ac.uk/ensemblgenomes/pub/plants/current/variation/vep"
+    plugins:
+      - LoFtool
+    cache-dir: ""
+    plugins-dir: ""
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     mapdamage
+  # ----------------------------------------------------------------------
+
+  mapdamage:
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     damageprofiler
+  # ----------------------------------------------------------------------
+
+  damageprofiler:
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     fastqc
+  # ----------------------------------------------------------------------
+
+  fastqc:
+    input: "trimmed"
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     qualimap
+  # ----------------------------------------------------------------------
+
+  qualimap:
+    bams: "processed"
+    extra: "--java-mem-size=64G"
+    threads: 2
+
+  # ----------------------------------------------------------------------
+  #     SeqKit
+  # ----------------------------------------------------------------------
+
+  seqkit:
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     MultiQC
+  # ----------------------------------------------------------------------
+
+  multiqc:
+    extra: ""
+
+  # ----------------------------------------------------------------------
+  #     HAFpipe
+  # ----------------------------------------------------------------------
+
+  hafpipe:
+    chromosomes: []
+    founder-vcf: ""
+    snp-table-dir: ""
+    snp-table-extra: ""
+    impmethod: ""
+    impute-script: ""
+    impute-conda: ""
+    impute-extra: ""
+    haplotype-frequencies-extra: "--winsize 1000"
+    allele-frequencies-extra: ""
+    keep-intermediates: false
+    make-sample-tables: true
+    make-merged-table: false
+    compress-sample-tables: false
+    compress-merged-table: false

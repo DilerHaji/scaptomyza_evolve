@@ -1,0 +1,15 @@
+channels:
+  - conda-forge
+  - bioconda
+  - anaconda
+dependencies:
+  - bcftools ==1.20
+  - tectonic ==0.15.0
+  - python ==3.12
+  - pandas ==2.2.2
+  - numpy  ==2.0.0
+  - matplotlib #==3.3.2 #==3.5.2
+
+  # https://github.com/moiexpositoalonsolab/grenepipe/issues/37
+  - chardet
+  - curl

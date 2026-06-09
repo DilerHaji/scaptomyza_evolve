@@ -1,0 +1,11 @@
+configfile: "config.yml"
+
+include: "rules/wildcards.smk"
+include: "rules/common.smk"
+include: "rules/grenedalf_interval.smk"
+include: "rules/grenedalf_diversity.smk"
+
+localrules:
+    all_founder_diversity,
+    all_trajectory_diversity,
+    diversity_gather,

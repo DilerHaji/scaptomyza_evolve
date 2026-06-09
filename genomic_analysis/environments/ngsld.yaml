@@ -1,0 +1,23 @@
+name: ngsld
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - angsd>=0.940
+  - samtools
+  - htslib
+  - r-base>=4.3
+  - r-optparse
+  - r-ggplot2
+  - r-plyr
+  - r-reshape2
+  - r-gtools
+  - r-data.table
+  # Build deps for ngsLD (has C source, needs compiling unless binary available)
+  - gcc_linux-64
+  - gxx_linux-64
+  - make
+  - gsl
+  - zlib
+  - pkg-config
