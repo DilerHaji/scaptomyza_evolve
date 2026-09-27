@@ -82,16 +82,19 @@ Portions of this code and documentation were developed with the assistance of AI
 
 ## Data availability
 
-- **Raw sequencing reads** — NCBI Sequence Read Archive, BioProject
+- **Raw sequencing reads**
+  NCBI Sequence Read Archive, BioProject
   [PRJNA1535502](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA1535502)
   (332 BioSamples: pooled time-series, founder and wild libraries, plus 192
   individually sequenced flies).
 
-- **Reference genome** — *Scaptomyza flava* assembly `sfla_v2`, GenBank
+- **Reference genome**
+  *Scaptomyza flava* assembly `sfla_v2`, GenBank
   [GCA_030179655.1](https://www.ncbi.nlm.nih.gov/datasets/genome/GCA_030179655.1/).
   Note that the annotation is included in the Zenodo archive below as `sfla_v2.gff3`.
 
-- **Processed data** — Zenodo
+- **Processed data**
+  Zenodo
   [10.5281/zenodo.22983766](https://doi.org/10.5281/zenodo.22983766)
   (allele-frequency matrices, per-window nucleotide diversity and FST tables,
   per-SNP GLMM output, phenotypic performance data, and the sfla_v2 annotation)
